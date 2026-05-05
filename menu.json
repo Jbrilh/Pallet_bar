@@ -1,0 +1,38 @@
+{
+  "categories": [
+    {
+      "name": "Beers 🍺",
+      "items": [
+        { "name": "Bedele", "price": 120 },
+        { "name": "Habesha", "price": 120 },
+        { "name": "St. George", "price": 120 },
+        { "name": "Heineken", "price": 180 }
+      ]
+    },
+    {
+      "name": "Spirits 🥃",
+      "items": [
+        { "name": "Johnnie Walker", "price": 350 },
+        { "name": "Jameson", "price": 300 },
+        { "name": "Local Whiskey", "price": 150 },
+        { "name": "Areki", "price": 80 }
+      ]
+    },
+    {
+      "name": "Wine 🍷",
+      "items": [
+        { "name": "Red Wine", "price": 200 },
+        { "name": "White Wine", "price": 200 }
+      ]
+    },
+    {
+      "name": "Soft Drinks 🥤",
+      "items": [
+        { "name": "Coca Cola", "price": 60 },
+        { "name": "Sprite", "price": 60 },
+        { "name": "Water", "price": 40 },
+        { "name": "Juice", "price": 80 }
+      ]
+    }
+  ]
+}
