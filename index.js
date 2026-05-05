@@ -4,25 +4,33 @@ const { Telegraf, Markup, session } = require('telegraf')
 const fs = require('fs')
 const path = require('path')
 
-// --------------------
-// BOT INIT
-// --------------------
 const bot = new Telegraf(process.env.BOT_TOKEN)
 
-// --------------------
-// GROUP ID
-// --------------------
-const GROUP_ID = -5098569760
+const BARTENDER_GROUP_ID  = -5098569760
+const WAITRESS_1_GROUP_ID = -5253381539
+const WAITRESS_2_GROUP_ID = -5257042379
 
-bot.on('message', (ctx) => {
-    console.log('Chat ID:', ctx.chat.id, '| Chat title:', ctx.chat.title)
-})
+const WAITRESS_CATEGORIES = ['Beers 🍺', 'Soft Drinks 🥤']
 
-// --------------------
-// LOAD MENU FROM JSON
-// Menu is loaded once at startup. To update the menu,
-// edit menu.json and redeploy (or restart the bot).
-// --------------------
+function getWaitressGroup(table) {
+    const num = parseInt(table.replace('Table ', ''))
+    return num <= 3 ? WAITRESS_1_GROUP_ID : WAITRESS_2_GROUP_ID
+}
+
+function splitCart(cart) {
+    const waitressItems = []
+    const bartenderItems = []
+    for (const item of cart) {
+        const menuEntry = ITEM_MAP[item.name]
+        if (menuEntry && WAITRESS_CATEGORIES.includes(menuEntry.category)) {
+            waitressItems.push(item)
+        } else {
+            bartenderItems.push(item)
+        }
+    }
+    return { waitressItems, bartenderItems }
+}
+
 function loadMenu() {
     const raw = fs.readFileSync(path.join(__dirname, 'menu.json'), 'utf8')
     return JSON.parse(raw)
@@ -30,8 +38,6 @@ function loadMenu() {
 
 const { categories } = loadMenu()
 
-// Build a flat lookup map: "Item Name" => { name, price, category }
-// Used to resolve any ordered item quickly
 const ITEM_MAP = {}
 for (const cat of categories) {
     for (const item of cat.items) {
@@ -39,66 +45,45 @@ for (const cat of categories) {
     }
 }
 
-// --------------------
-// KEYBOARD BUILDERS
-// --------------------
 const tableKeyboard = Markup.keyboard([
     ['Table 1', 'Table 2', 'Table 3'],
     ['Table 4', 'Table 5', 'Table 6']
 ]).resize().oneTime()
 
-// Main menu: category buttons + cart actions + request bill always last
 function buildMainMenu() {
     const categoryButtons = categories.map(cat => cat.name)
-
-    // Split category buttons into rows of 2
     const catRows = []
     for (let i = 0; i < categoryButtons.length; i += 2) {
         catRows.push(categoryButtons.slice(i, i + 2))
     }
-
     return Markup.keyboard([
         ...catRows,
         ['🛒 View Cart', '✅ Checkout'],
-        ['🗑 Clear Cart', '🧾 Request Bill']  // Request Bill always last
+        ['🗑 Clear Cart', '🧾 Request Bill']
     ]).resize()
 }
 
-// Category submenu: list items + back button
 function buildCategoryMenu(categoryName) {
     const cat = categories.find(c => c.name === categoryName)
     if (!cat) return buildMainMenu()
-
     const itemButtons = cat.items.map(item => `${item.name} — ${item.price} ETB`)
-
-    // Split into rows of 2
     const rows = []
     for (let i = 0; i < itemButtons.length; i += 2) {
         rows.push(itemButtons.slice(i, i + 2))
     }
-
-    return Markup.keyboard([
-        ...rows,
-        ['⬅️ Back to Menu']
-    ]).resize()
+    return Markup.keyboard([...rows, ['⬅️ Back to Menu']]).resize()
 }
 
-// --------------------
-// SESSION
-// --------------------
 bot.use(session({
     defaultSession: () => ({
         table: null,
-        cart: [],        // current round being built
-        tab: [],         // all confirmed rounds for this table visit
-        step: 'idle',    // 'idle' | 'selecting_table' | 'ordering' | 'browsing_category'
+        cart: [],
+        tab: [],
+        step: 'idle',
         activeCategory: null
     })
 }))
 
-// --------------------
-// HELPERS
-// --------------------
 function resetSession(ctx) {
     ctx.session.table = null
     ctx.session.cart = []
@@ -120,9 +105,44 @@ function requireTable(ctx) {
     return true
 }
 
-// --------------------
-// START
-// --------------------
+function formatItems(items) {
+    return items.map(i => `  - ${i.name} x ${i.qty}`).join('\n')
+}
+
+async function sendOrderNotifications(table, customer, roundNumber, cart) {
+    const { waitressItems, bartenderItems } = splitCart(cart)
+    const waitressGroup = getWaitressGroup(table)
+    const orderId = `${table.replace(' ', '')}_R${roundNumber}_${Date.now()}`
+
+    const statusButtons = (id) => ({
+        reply_markup: {
+            inline_keyboard: [[
+                { text: '👀 Received',    callback_data: `status_received_${id}` },
+                { text: '🔄 In progress', callback_data: `status_inprogress_${id}` },
+                { text: '✅ Served',      callback_data: `status_served_${id}` }
+            ]]
+        }
+    })
+
+    if (waitressItems.length > 0) {
+        const text =
+            `🛎 NEW ORDER - Round ${roundNumber}\n\n` +
+            `Table: ${table}\n` +
+            `Customer: ${customer}\n\n` +
+            `Items:\n${formatItems(waitressItems)}`
+        await bot.telegram.sendMessage(waitressGroup, text, statusButtons(`W_${orderId}`))
+    }
+
+    if (bartenderItems.length > 0) {
+        const text =
+            `🍾 NEW ORDER - Round ${roundNumber}\n\n` +
+            `Table: ${table}\n` +
+            `Customer: ${customer}\n\n` +
+            `Items:\n${formatItems(bartenderItems)}`
+        await bot.telegram.sendMessage(BARTENDER_GROUP_ID, text, statusButtons(`B_${orderId}`))
+    }
+}
+
 bot.start((ctx) => {
     resetSession(ctx)
     ctx.reply(
@@ -133,150 +153,97 @@ bot.start((ctx) => {
     )
 })
 
-// --------------------
-// START_ORDER action
-// --------------------
 bot.action('START_ORDER', async (ctx) => {
     await ctx.answerCbQuery()
     ctx.session.step = 'selecting_table'
     ctx.reply('Select your table:', tableKeyboard)
 })
 
-// --------------------
-// TABLE SELECTION
-// --------------------
 bot.hears(/^Table \d+$/, (ctx) => {
     if (ctx.session.step !== 'selecting_table') {
         return ctx.reply('⚠️ You already have a table. Use the menu below.', buildMainMenu())
     }
-
     const table = ctx.match[0]
     ctx.session.table = table
     ctx.session.step = 'ordering'
-
     ctx.reply(`✅ You are at ${table}. What would you like to order?`, buildMainMenu())
 })
 
-// --------------------
-// CATEGORY NAVIGATION
-// --------------------
-// Match any category name dynamically
 const categoryNames = categories.map(c => c.name)
 
 bot.hears(categoryNames, (ctx) => {
     if (!requireTable(ctx)) return
-
     const categoryName = ctx.message.text
     ctx.session.activeCategory = categoryName
     ctx.session.step = 'browsing_category'
-
-    const cat = categories.find(c => c.name === categoryName)
     ctx.reply(`${categoryName}\n\nChoose an item:`, buildCategoryMenu(categoryName))
 })
 
-// Back to main menu
 bot.hears('⬅️ Back to Menu', (ctx) => {
     ctx.session.activeCategory = null
     ctx.session.step = 'ordering'
     ctx.reply('What else would you like?', buildMainMenu())
 })
 
-// --------------------
-// ADD TO CART
-// Match pattern: "Item Name — 120 ETB"
-// --------------------
 bot.hears(/^(.+) — \d+ ETB$/, (ctx) => {
     if (!requireTable(ctx)) return
-
     const itemName = ctx.match[1]
     const item = ITEM_MAP[itemName]
-
     if (!item) return ctx.reply('Item not found ❌', buildMainMenu())
-
     const cart = ctx.session.cart
     const existing = cart.find(i => i.name === item.name)
-
     if (existing) {
         existing.qty += 1
     } else {
         cart.push({ name: item.name, price: item.price, qty: 1 })
     }
-
     ctx.reply(
-        `✅ ${item.name} added to cart!\n\nAdd more from ${ctx.session.activeCategory} or go back to the menu.`,
+        `✅ ${item.name} added to cart!\n\nAdd more or go back to the menu.`,
         buildCategoryMenu(ctx.session.activeCategory)
     )
 })
 
-// --------------------
-// VIEW CART
-// --------------------
 bot.hears('🛒 View Cart', (ctx) => {
     if (!requireTable(ctx)) return
-
     const cart = ctx.session.cart
     if (!cart.length) return ctx.reply('Your cart is empty 🛒', buildMainMenu())
-
-    const lines = cart.map(i => `• ${i.name} × ${i.qty} = ${i.price * i.qty} ETB`)
+    const lines = cart.map(i => `• ${i.name} x ${i.qty} = ${i.price * i.qty} ETB`)
     const total = cart.reduce((sum, i) => sum + i.price * i.qty, 0)
-
     ctx.reply(
-        `🛒 *Your Cart:*\n\n${lines.join('\n')}\n\n_Total: ${total} ETB_`,
-        { parse_mode: 'Markdown', ...buildMainMenu() }
+        `🛒 Your Cart:\n\n${lines.join('\n')}\n\nTotal: ${total} ETB`,
+        buildMainMenu()
     )
 })
 
-// --------------------
-// CLEAR CART
-// --------------------
 bot.hears('🗑 Clear Cart', (ctx) => {
     if (!requireTable(ctx)) return
     ctx.session.cart = []
     ctx.reply('Cart cleared 🗑', buildMainMenu())
 })
 
-// --------------------
-// CHECKOUT (send tab update to bartender)
-// --------------------
-bot.hears('✅ Checkout', (ctx) => {
+bot.hears('✅ Checkout', async (ctx) => {
     if (!requireTable(ctx)) return
-
     const { cart, table } = ctx.session
     const customer = ctx.from.first_name
-
     if (!cart.length) return ctx.reply('Your cart is empty ❌', buildMainMenu())
-
     const roundNumber = ctx.session.tab.length + 1
-    const itemsText = cart.map(i => `  - ${i.name} × ${i.qty}`).join('\n')
-    const orderText =
-        `🧾 ORDER — Round ${roundNumber}\n\n` +
-        `Table: ${table}\n` +
-        `Customer: ${customer}\n\n` +
-        `Items:\n${itemsText}\n\n` +
-        `⏳ Running tab active`
-
-    // Save this round to the tab and clear the cart
     ctx.session.tab.push({ round: roundNumber, items: [...cart] })
     ctx.session.cart = []
-
-    bot.telegram.sendMessage(GROUP_ID, orderText)
-    ctx.reply(`✅ Round ${roundNumber} sent to bar!\n\nKeep ordering or request your bill when ready.`, buildMainMenu())
+    await sendOrderNotifications(table, customer, roundNumber, cart)
+    ctx.reply(
+        `✅ Round ${roundNumber} sent!\n\nKeep ordering or request your bill when ready.`,
+        buildMainMenu()
+    )
 })
 
-// --------------------
-// REQUEST BILL
-// --------------------
 bot.hears('🧾 Request Bill', (ctx) => {
     if (!requireTable(ctx)) return
-
     const { cart, table } = ctx.session
     const customer = ctx.from.first_name
-
     const tab = ctx.session.tab
     const hasAnything = tab.length > 0 || cart.length > 0
     if (!hasAnything) return ctx.reply('No items on tab yet ❌', buildMainMenu())
 
-    // Include current unsubmitted cart as a pending round if not empty
     const allRounds = [...tab]
     if (cart.length > 0) {
         allRounds.push({ round: tab.length + 1, items: cart, pending: true })
@@ -287,7 +254,7 @@ bot.hears('🧾 Request Bill', (ctx) => {
         const roundLines = round.items.map(i => {
             const lineTotal = i.price * i.qty
             total += lineTotal
-            return `    - ${i.name} × ${i.qty} = ${lineTotal} ETB`
+            return `    - ${i.name} x ${i.qty} = ${lineTotal} ETB`
         }).join('\n')
         const label = round.pending ? `Round ${round.round} (pending)` : `Round ${round.round}`
         return `${label}:\n${roundLines}`
@@ -300,7 +267,7 @@ bot.hears('🧾 Request Bill', (ctx) => {
         `${breakdown}\n\n` +
         `💰 TOTAL: ${total} ETB`
 
-    bot.telegram.sendMessage(GROUP_ID, billText, {
+    bot.telegram.sendMessage(BARTENDER_GROUP_ID, billText, {
         reply_markup: {
             inline_keyboard: [[{ text: '💰 PAID', callback_data: `paid_${table}` }]]
         }
@@ -309,9 +276,6 @@ bot.hears('🧾 Request Bill', (ctx) => {
     ctx.reply(`💰 Bill requested! Total: ${total} ETB\nThe bartender will confirm your payment.`)
 })
 
-// --------------------
-// PAID BUTTON HANDLER (bartender side)
-// --------------------
 bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data
 
@@ -319,25 +283,49 @@ bot.on('callback_query', async (ctx) => {
 
     if (data.startsWith('paid_')) {
         const table = data.replace('paid_', '')
+        await ctx.answerCbQuery('Payment confirmed ✅')
+        await ctx.editMessageText(
+            ctx.callbackQuery.message.text + '\n\n✅ PAID',
+            { reply_markup: { inline_keyboard: [] } }
+        ).catch(() => {})
+        bot.telegram.sendMessage(BARTENDER_GROUP_ID, `✅ PAYMENT COMPLETED\n${table} is now closed`)
+        return
+    }
 
-        // Find and reset the session for this table
-        for (const [, sess] of Object.entries(bot.context?.sessions ?? {})) {
-            if (sess.table === table) {
-                sess.cart = []
-                sess.tab = []
-                sess.table = null
-                sess.step = 'idle'
-            }
+    if (data.startsWith('status_')) {
+        const parts = data.split('_')
+        const action = parts[1]
+        const idParts = parts.slice(2).join('_')
+        const staffLabel = idParts.startsWith('W') ? 'Waitress' : 'Bartender'
+
+        const statusMap = {
+            received:   { text: '👀 Received',    answer: 'Marked as received!' },
+            inprogress: { text: '🔄 In progress', answer: 'Marked as in progress!' },
+            served:     { text: '✅ Served',      answer: 'Marked as served!' }
         }
 
-        await ctx.answerCbQuery('Payment confirmed ✅')
-        bot.telegram.sendMessage(GROUP_ID, `✅ PAYMENT COMPLETED\n${table} is now closed`)
+        const status = statusMap[action]
+        if (!status) return ctx.answerCbQuery('Unknown status')
+
+        await ctx.answerCbQuery(status.answer)
+
+        const originalText = ctx.callbackQuery.message.text
+        const cleanText = originalText.replace(/\n\nStatus:.*$/s, '')
+        const statusLine = `\n\nStatus: ${status.text} (${staffLabel})`
+
+        await ctx.editMessageText(cleanText + statusLine, {
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: '👀 Received',    callback_data: `status_received_${idParts}` },
+                    { text: '🔄 In progress', callback_data: `status_inprogress_${idParts}` },
+                    { text: '✅ Served',      callback_data: `status_served_${idParts}` }
+                ]]
+            }
+        }).catch(() => {})
+        return
     }
 })
 
-// --------------------
-// LAUNCH
-// --------------------
 bot.launch()
 console.log('🍻 Bar POS Bot Running...')
 
