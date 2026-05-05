@@ -85,8 +85,9 @@ function buildCategoryMenu(categoryName) {
 bot.use(session({
     defaultSession: () => ({
         table: null,
-        cart: [],
-        step: 'idle',        // 'idle' | 'selecting_table' | 'ordering' | 'browsing_category'
+        cart: [],        // current round being built
+        tab: [],         // all confirmed rounds for this table visit
+        step: 'idle',    // 'idle' | 'selecting_table' | 'ordering' | 'browsing_category'
         activeCategory: null
     })
 }))
@@ -97,6 +98,7 @@ bot.use(session({
 function resetSession(ctx) {
     ctx.session.table = null
     ctx.session.cart = []
+    ctx.session.tab = []
     ctx.session.step = 'idle'
     ctx.session.activeCategory = null
 }
@@ -240,16 +242,21 @@ bot.hears('✅ Checkout', (ctx) => {
 
     if (!cart.length) return ctx.reply('Your cart is empty ❌', buildMainMenu())
 
+    const roundNumber = ctx.session.tab.length + 1
     const itemsText = cart.map(i => `  - ${i.name} × ${i.qty}`).join('\n')
     const orderText =
-        `🧾 TAB UPDATED\n\n` +
+        `🧾 ORDER — Round ${roundNumber}\n\n` +
         `Table: ${table}\n` +
         `Customer: ${customer}\n\n` +
         `Items:\n${itemsText}\n\n` +
         `⏳ Running tab active`
 
+    // Save this round to the tab and clear the cart
+    ctx.session.tab.push({ round: roundNumber, items: [...cart] })
+    ctx.session.cart = []
+
     bot.telegram.sendMessage(GROUP_ID, orderText)
-    ctx.reply('Order sent to bar! Added to your tab 🧾', buildMainMenu())
+    ctx.reply(`✅ Round ${roundNumber} sent to bar!\n\nKeep ordering or request your bill when ready.`, buildMainMenu())
 })
 
 // --------------------
@@ -261,20 +268,32 @@ bot.hears('🧾 Request Bill', (ctx) => {
     const { cart, table } = ctx.session
     const customer = ctx.from.first_name
 
-    if (!cart.length) return ctx.reply('No items on tab yet ❌', buildMainMenu())
+    const tab = ctx.session.tab
+    const hasAnything = tab.length > 0 || cart.length > 0
+    if (!hasAnything) return ctx.reply('No items on tab yet ❌', buildMainMenu())
+
+    // Include current unsubmitted cart as a pending round if not empty
+    const allRounds = [...tab]
+    if (cart.length > 0) {
+        allRounds.push({ round: tab.length + 1, items: cart, pending: true })
+    }
 
     let total = 0
-    const breakdown = cart.map(i => {
-        const lineTotal = i.price * i.qty
-        total += lineTotal
-        return `  - ${i.name} × ${i.qty} = ${lineTotal} ETB`
-    }).join('\n')
+    const breakdown = allRounds.map(round => {
+        const roundLines = round.items.map(i => {
+            const lineTotal = i.price * i.qty
+            total += lineTotal
+            return `    - ${i.name} × ${i.qty} = ${lineTotal} ETB`
+        }).join('\n')
+        const label = round.pending ? `Round ${round.round} (pending)` : `Round ${round.round}`
+        return `${label}:\n${roundLines}`
+    }).join('\n\n')
 
     const billText =
         `🧾 FINAL BILL\n\n` +
         `Table: ${table}\n` +
         `Customer: ${customer}\n\n` +
-        `Items:\n${breakdown}\n\n` +
+        `${breakdown}\n\n` +
         `💰 TOTAL: ${total} ETB`
 
     bot.telegram.sendMessage(GROUP_ID, billText, {
@@ -301,6 +320,7 @@ bot.on('callback_query', async (ctx) => {
         for (const [, sess] of Object.entries(bot.context?.sessions ?? {})) {
             if (sess.table === table) {
                 sess.cart = []
+                sess.tab = []
                 sess.table = null
                 sess.step = 'idle'
             }
