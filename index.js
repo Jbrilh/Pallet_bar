@@ -276,54 +276,49 @@ bot.hears('🧾 Request Bill', (ctx) => {
     ctx.reply(`💰 Bill requested! Total: ${total} ETB\nThe bartender will confirm your payment.`)
 })
 
-bot.on('callback_query', async (ctx) => {
+// ---------- PAID ----------
+bot.action(/^paid_/, async (ctx) => {
+    const table = ctx.callbackQuery.data.replace('paid_', '')
+    await ctx.answerCbQuery('Payment confirmed ✅')
+    await ctx.editMessageText(
+        ctx.callbackQuery.message.text + '\n\n✅ PAID',
+        { reply_markup: { inline_keyboard: [] } }
+    ).catch(() => {})
+    bot.telegram.sendMessage(BARTENDER_GROUP_ID, `✅ PAYMENT COMPLETED\n${table} is now closed`)
+})
+
+// ---------- ORDER STATUS ----------
+bot.action(/^status_/, async (ctx) => {
     const data = ctx.callbackQuery.data
+    const parts = data.split('_')
+    const action = parts[1]
+    const idParts = parts.slice(2).join('_')
+    const staffLabel = idParts.startsWith('W') ? 'Waitress' : 'Bartender'
 
-    if (data === 'START_ORDER') return
-
-    if (data.startsWith('paid_')) {
-        const table = data.replace('paid_', '')
-        await ctx.answerCbQuery('Payment confirmed ✅')
-        await ctx.editMessageText(
-            ctx.callbackQuery.message.text + '\n\n✅ PAID',
-            { reply_markup: { inline_keyboard: [] } }
-        ).catch(() => {})
-        bot.telegram.sendMessage(BARTENDER_GROUP_ID, `✅ PAYMENT COMPLETED\n${table} is now closed`)
-        return
+    const statusMap = {
+        received:   { text: '👀 Received',    answer: 'Marked as received!' },
+        inprogress: { text: '🔄 In progress', answer: 'Marked as in progress!' },
+        served:     { text: '✅ Served',      answer: 'Marked as served!' }
     }
 
-    if (data.startsWith('status_')) {
-        const parts = data.split('_')
-        const action = parts[1]
-        const idParts = parts.slice(2).join('_')
-        const staffLabel = idParts.startsWith('W') ? 'Waitress' : 'Bartender'
+    const status = statusMap[action]
+    if (!status) return ctx.answerCbQuery('Unknown status')
 
-        const statusMap = {
-            received:   { text: '👀 Received',    answer: 'Marked as received!' },
-            inprogress: { text: '🔄 In progress', answer: 'Marked as in progress!' },
-            served:     { text: '✅ Served',      answer: 'Marked as served!' }
+    await ctx.answerCbQuery(status.answer)
+
+    const originalText = ctx.callbackQuery.message.text
+    const cleanText = originalText.replace(/\n\nStatus:.*$/s, '')
+    const statusLine = `\n\nStatus: ${status.text} (${staffLabel})`
+
+    await ctx.editMessageText(cleanText + statusLine, {
+        reply_markup: {
+            inline_keyboard: [[
+                { text: '👀 Received',    callback_data: `status_received_${idParts}` },
+                { text: '🔄 In progress', callback_data: `status_inprogress_${idParts}` },
+                { text: '✅ Served',      callback_data: `status_served_${idParts}` }
+            ]]
         }
-
-        const status = statusMap[action]
-        if (!status) return ctx.answerCbQuery('Unknown status')
-
-        await ctx.answerCbQuery(status.answer)
-
-        const originalText = ctx.callbackQuery.message.text
-        const cleanText = originalText.replace(/\n\nStatus:.*$/s, '')
-        const statusLine = `\n\nStatus: ${status.text} (${staffLabel})`
-
-        await ctx.editMessageText(cleanText + statusLine, {
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: '👀 Received',    callback_data: `status_received_${idParts}` },
-                    { text: '🔄 In progress', callback_data: `status_inprogress_${idParts}` },
-                    { text: '✅ Served',      callback_data: `status_served_${idParts}` }
-                ]]
-            }
-        }).catch(() => {})
-        return
-    }
+    }).catch(() => {})
 })
 
 bot.launch()
