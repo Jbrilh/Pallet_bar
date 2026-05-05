@@ -14,6 +14,10 @@ const bot = new Telegraf(process.env.BOT_TOKEN)
 // --------------------
 const GROUP_ID = -5098569760
 
+bot.on('message', (ctx) => {
+    console.log('Chat ID:', ctx.chat.id, '| Chat title:', ctx.chat.title)
+})
+
 // --------------------
 // LOAD MENU FROM JSON
 // Menu is loaded once at startup. To update the menu,
