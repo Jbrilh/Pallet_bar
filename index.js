@@ -449,7 +449,7 @@ bot.action(/^paid/, async (ctx) => {
             {
                 reply_markup: {
                     inline_keyboard: [[
-                        { text: '📊 Open Dashboard', web_app: { url: DASHBOARD_URL } }
+                        { text: '📊 Open Dashboard', url: DASHBOARD_URL }
                     ]]
                 }
             }
@@ -509,7 +509,7 @@ bot.command('dashboard', (ctx) => {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [[
-                    { text: '📊 Open Dashboard', web_app: { url: DASHBOARD_URL } }
+                    { text: '📊 Open Dashboard', url: DASHBOARD_URL }
                 ]]
             }
         }
@@ -518,6 +518,12 @@ bot.command('dashboard', (ctx) => {
 
 // Also send dashboard button whenever a payment is completed
 // (already done in paid handler — button added below)
+
+// Catch-all for debugging — logs ALL callback queries
+bot.on('callback_query', async (ctx) => {
+    console.log('RAW CALLBACK:', ctx.callbackQuery.data)
+    await ctx.answerCbQuery().catch(() => {})
+})
 
 bot.launch()
 console.log('🍻 Bar POS Bot Running...')
