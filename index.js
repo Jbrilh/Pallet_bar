@@ -3,13 +3,45 @@ require('dotenv').config()
 const { Telegraf, Markup, session } = require('telegraf')
 const fs = require('fs')
 const path = require('path')
+const { createClient } = require('@supabase/supabase-js')
 
+// --------------------
+// BOT + SUPABASE INIT
+// --------------------
 const bot = new Telegraf(process.env.BOT_TOKEN)
+const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_ANON_KEY
+)
 
+// --------------------
+// STAFF GROUP IDs
+// --------------------
 const BARTENDER_GROUP_ID  = -5098569760
 const WAITRESS_1_GROUP_ID = -5253381539
 const WAITRESS_2_GROUP_ID = -5257042379
+const OWNER_GROUP_ID      = -5040789601
 
+// --------------------
+// MENU
+// --------------------
+function loadMenu() {
+    const raw = fs.readFileSync(path.join(__dirname, 'menu.json'), 'utf8')
+    return JSON.parse(raw)
+}
+
+const { categories } = loadMenu()
+
+const ITEM_MAP = {}
+for (const cat of categories) {
+    for (const item of cat.items) {
+        ITEM_MAP[item.name] = { ...item, category: cat.name }
+    }
+}
+
+// --------------------
+// ROUTING
+// --------------------
 const WAITRESS_CATEGORIES = ['Beers 🍺', 'Soft Drinks 🥤']
 
 function getWaitressGroup(table) {
@@ -31,20 +63,9 @@ function splitCart(cart) {
     return { waitressItems, bartenderItems }
 }
 
-function loadMenu() {
-    const raw = fs.readFileSync(path.join(__dirname, 'menu.json'), 'utf8')
-    return JSON.parse(raw)
-}
-
-const { categories } = loadMenu()
-
-const ITEM_MAP = {}
-for (const cat of categories) {
-    for (const item of cat.items) {
-        ITEM_MAP[item.name] = { ...item, category: cat.name }
-    }
-}
-
+// --------------------
+// KEYBOARDS
+// --------------------
 const tableKeyboard = Markup.keyboard([
     ['Table 1', 'Table 2', 'Table 3'],
     ['Table 4', 'Table 5', 'Table 6']
@@ -74,22 +95,28 @@ function buildCategoryMenu(categoryName) {
     return Markup.keyboard([...rows, ['⬅️ Back to Menu']]).resize()
 }
 
-
-
+// --------------------
+// SESSION
+// --------------------
 bot.use(session({
     defaultSession: () => ({
         table: null,
         cart: [],
         tab: [],
+        orderId: null,   // Supabase order ID for this table visit
         step: 'idle',
         activeCategory: null
     })
 }))
 
+// --------------------
+// HELPERS
+// --------------------
 function resetSession(ctx) {
     ctx.session.table = null
     ctx.session.cart = []
     ctx.session.tab = []
+    ctx.session.orderId = null
     ctx.session.step = 'idle'
     ctx.session.activeCategory = null
 }
@@ -111,6 +138,47 @@ function formatItems(items) {
     return items.map(i => `  - ${i.name} x ${i.qty}`).join('\n')
 }
 
+// --------------------
+// SUPABASE HELPERS
+// --------------------
+
+// Create a new order record when a table starts ordering
+async function createOrder(table, customer) {
+    const { data, error } = await supabase
+        .from('orders')
+        .insert({ table_name: table, customer, total: 0, status: 'open' })
+        .select('id')
+        .single()
+    if (error) { console.error('createOrder error:', error); return null }
+    return data.id
+}
+
+// Save items from a round to order_items
+async function saveRoundItems(orderId, roundNumber, items) {
+    const rows = items.map(i => ({
+        order_id: orderId,
+        round_number: roundNumber,
+        item_name: i.name,
+        category: ITEM_MAP[i.name]?.category ?? 'Unknown',
+        qty: i.qty,
+        price: i.price
+    }))
+    const { error } = await supabase.from('order_items').insert(rows)
+    if (error) console.error('saveRoundItems error:', error)
+}
+
+// Update the order total and mark as paid
+async function markOrderPaid(orderId, total) {
+    const { error } = await supabase
+        .from('orders')
+        .update({ status: 'paid', total, paid_at: new Date().toISOString() })
+        .eq('id', orderId)
+    if (error) console.error('markOrderPaid error:', error)
+}
+
+// --------------------
+// ORDER NOTIFICATIONS
+// --------------------
 async function sendOrderNotifications(table, customer, roundNumber, cart) {
     const { waitressItems, bartenderItems } = splitCart(cart)
     const waitressGroup = getWaitressGroup(table)
@@ -145,7 +213,16 @@ async function sendOrderNotifications(table, customer, roundNumber, cart) {
     }
 }
 
+// --------------------
+// DASHBOARD URL
+// --------------------
+const DASHBOARD_URL = 'https://zingy-gumption-99ad2b.netlify.app/'
+
+// --------------------
+// START
+// --------------------
 bot.start((ctx) => {
+    if (ctx.chat.type !== 'private') return
     resetSession(ctx)
     ctx.reply(
         `🍻 Welcome!\n\nTap below to pick your table and start ordering 👇`,
@@ -155,22 +232,37 @@ bot.start((ctx) => {
     )
 })
 
+// --------------------
+// START_ORDER
+// --------------------
 bot.action('START_ORDER', async (ctx) => {
     await ctx.answerCbQuery()
     ctx.session.step = 'selecting_table'
     ctx.reply('Select your table:', tableKeyboard)
 })
 
-bot.hears(/^Table \d+$/, (ctx) => {
+// --------------------
+// TABLE SELECTION
+// --------------------
+bot.hears(/^Table \d+$/, async (ctx) => {
     if (ctx.session.step !== 'selecting_table') {
         return ctx.reply('⚠️ You already have a table. Use the menu below.', buildMainMenu())
     }
     const table = ctx.match[0]
+    const customer = ctx.from.first_name
+
+    // Create order in Supabase as soon as table is selected
+    const orderId = await createOrder(table, customer)
+    ctx.session.orderId = orderId
     ctx.session.table = table
     ctx.session.step = 'ordering'
+
     ctx.reply(`✅ You are at ${table}. What would you like to order?`, buildMainMenu())
 })
 
+// --------------------
+// CATEGORY NAVIGATION
+// --------------------
 const categoryNames = categories.map(c => c.name)
 
 bot.hears(categoryNames, (ctx) => {
@@ -187,6 +279,9 @@ bot.hears('⬅️ Back to Menu', (ctx) => {
     ctx.reply('What else would you like?', buildMainMenu())
 })
 
+// --------------------
+// ADD TO CART
+// --------------------
 bot.hears(/^(.+) — \d+ ETB$/, (ctx) => {
     if (!requireTable(ctx)) return
     const itemName = ctx.match[1]
@@ -205,6 +300,9 @@ bot.hears(/^(.+) — \d+ ETB$/, (ctx) => {
     )
 })
 
+// --------------------
+// VIEW CART
+// --------------------
 bot.hears('🛒 View Cart', (ctx) => {
     if (!requireTable(ctx)) return
     const cart = ctx.session.cart
@@ -217,20 +315,31 @@ bot.hears('🛒 View Cart', (ctx) => {
     )
 })
 
+// --------------------
+// CLEAR CART
+// --------------------
 bot.hears('🗑 Clear Cart', (ctx) => {
     if (!requireTable(ctx)) return
     ctx.session.cart = []
     ctx.reply('Cart cleared 🗑', buildMainMenu())
 })
 
+// --------------------
+// CHECKOUT
+// --------------------
 bot.hears('✅ Checkout', async (ctx) => {
     if (!requireTable(ctx)) return
-    const { cart, table } = ctx.session
+    const { cart, table, orderId } = ctx.session
     const customer = ctx.from.first_name
     if (!cart.length) return ctx.reply('Your cart is empty ❌', buildMainMenu())
+
     const roundNumber = ctx.session.tab.length + 1
     ctx.session.tab.push({ round: roundNumber, items: [...cart] })
     ctx.session.cart = []
+
+    // Save round to Supabase
+    if (orderId) await saveRoundItems(orderId, roundNumber, cart)
+
     await sendOrderNotifications(table, customer, roundNumber, cart)
     ctx.reply(
         `✅ Round ${roundNumber} sent!\n\nKeep ordering or request your bill when ready.`,
@@ -238,9 +347,12 @@ bot.hears('✅ Checkout', async (ctx) => {
     )
 })
 
+// --------------------
+// REQUEST BILL
+// --------------------
 bot.hears('🧾 Request Bill', (ctx) => {
     if (!requireTable(ctx)) return
-    const { cart, table } = ctx.session
+    const { cart, table, orderId } = ctx.session
     const customer = ctx.from.first_name
     const tab = ctx.session.tab
     const hasAnything = tab.length > 0 || cart.length > 0
@@ -269,27 +381,72 @@ bot.hears('🧾 Request Bill', (ctx) => {
         `${breakdown}\n\n` +
         `💰 TOTAL: ${total} ETB`
 
+    // Pass orderId and total in callback so paid handler can update Supabase
     bot.telegram.sendMessage(BARTENDER_GROUP_ID, billText, {
         reply_markup: {
-            inline_keyboard: [[{ text: '💰 PAID', callback_data: `paid_${table}` }]]
+            inline_keyboard: [[{
+                text: '💰 PAID',
+                callback_data: `paid_${table}_${orderId}_${total}`
+            }]]
         }
     })
 
     ctx.reply(`💰 Bill requested! Total: ${total} ETB\nThe bartender will confirm your payment.`)
 })
 
-// ---------- PAID ----------
+// --------------------
+// PAID
+// --------------------
 bot.action(/^paid_/, async (ctx) => {
-    const table = ctx.callbackQuery.data.replace('paid_', '')
+    const data = ctx.callbackQuery.data
+    // format: paid_{table}_{orderId}_{total}
+    const parts = data.replace('paid_', '').split('_')
+    const table = parts[0]
+    const orderId = parts[1]
+    const total = parseInt(parts[2]) || 0
+
     await ctx.answerCbQuery('Payment confirmed ✅')
     await ctx.editMessageText(
         ctx.callbackQuery.message.text + '\n\n✅ PAID',
         { reply_markup: { inline_keyboard: [] } }
     ).catch(() => {})
+
+    // Mark order as paid in Supabase
+    if (orderId && orderId !== 'null') await markOrderPaid(orderId, total)
+
+    // Notify owner group with daily running total
+    if (OWNER_GROUP_ID) {
+        const today = new Date().toISOString().split('T')[0]
+        const { data: todayOrders } = await supabase
+            .from('orders')
+            .select('total')
+            .eq('status', 'paid')
+            .gte('paid_at', `${today}T00:00:00`)
+
+        const dailyTotal = todayOrders?.reduce((sum, o) => sum + o.total, 0) ?? 0
+
+        bot.telegram.sendMessage(
+            OWNER_GROUP_ID,
+            `💰 PAYMENT RECEIVED\n\n` +
+            `Table: ${table}\n` +
+            `Bill: ${total} ETB\n\n` +
+            `📊 Today's total so far: ${dailyTotal} ETB`,
+            {
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '📊 Open Dashboard', web_app: { url: DASHBOARD_URL } }
+                    ]]
+                }
+            }
+        )
+    }
+
     bot.telegram.sendMessage(BARTENDER_GROUP_ID, `✅ PAYMENT COMPLETED\n${table} is now closed`)
 })
 
-// ---------- ORDER STATUS ----------
+// --------------------
+// ORDER STATUS
+// --------------------
 bot.action(/^status_/, async (ctx) => {
     const data = ctx.callbackQuery.data
     const parts = data.split('_')
@@ -305,7 +462,6 @@ bot.action(/^status_/, async (ctx) => {
 
     const status = statusMap[action]
     if (!status) return ctx.answerCbQuery('Unknown status')
-
     await ctx.answerCbQuery(status.answer)
 
     const originalText = ctx.callbackQuery.message.text
@@ -322,6 +478,32 @@ bot.action(/^status_/, async (ctx) => {
         }
     }).catch(() => {})
 })
+
+// --------------------
+// LAUNCH
+// --------------------
+// --------------------
+// DASHBOARD COMMAND (owner group only)
+// --------------------
+bot.command('dashboard', (ctx) => {
+    if (ctx.chat.id !== OWNER_GROUP_ID) return
+    ctx.reply(
+        '📊 *Bar Dashboard*
+
+Tap below to open the owner dashboard:',
+        {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: '📊 Open Dashboard', web_app: { url: DASHBOARD_URL } }
+                ]]
+            }
+        }
+    )
+})
+
+// Also send dashboard button whenever a payment is completed
+// (already done in paid handler — button added below)
 
 bot.launch()
 console.log('🍻 Bar POS Bot Running...')
