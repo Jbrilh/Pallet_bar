@@ -406,29 +406,41 @@ bot.action(/^paid/, async (ctx) => {
     const orderId = parts[2]
     const total = parseInt(parts[3]) || 0
 
+    console.log(`PAID handler triggered: data=${data}`)
     console.log(`PAID handler: table=${table} orderId=${orderId} total=${total}`)
 
     await ctx.answerCbQuery('Payment confirmed ✅')
     await ctx.editMessageText(
         ctx.callbackQuery.message.text + '\n\n✅ PAID',
         { reply_markup: { inline_keyboard: [] } }
-    ).catch(() => {})
+    ).catch((e) => console.log('editMessageText error:', e.message))
 
     // Mark order as paid in Supabase
-    if (orderId && orderId !== 'null') await markOrderPaid(orderId, total)
+    if (orderId && orderId !== 'null') {
+        await markOrderPaid(orderId, total)
+        console.log(`Marked order ${orderId} as paid`)
+    }
 
-    // Notify owner group with daily running total
-    if (OWNER_GROUP_ID) {
+    // Notify bartender
+    await bot.telegram.sendMessage(BARTENDER_GROUP_ID, `✅ PAYMENT COMPLETED\n${table} is now closed`)
+        .catch(e => console.log('Bartender msg error:', e.message))
+
+    // Notify owner group
+    console.log(`Sending to owner group: ${OWNER_GROUP_ID}`)
+    try {
         const today = new Date().toISOString().split('T')[0]
-        const { data: todayOrders } = await supabase
+        const { data: todayOrders, error: dbErr } = await supabase
             .from('orders')
             .select('total')
             .eq('status', 'paid')
             .gte('paid_at', `${today}T00:00:00`)
 
-        const dailyTotal = todayOrders?.reduce((sum, o) => sum + o.total, 0) ?? 0
+        if (dbErr) console.log('Supabase query error:', dbErr.message)
 
-        bot.telegram.sendMessage(
+        const dailyTotal = todayOrders?.reduce((sum, o) => sum + o.total, 0) ?? 0
+        console.log(`Daily total: ${dailyTotal}`)
+
+        await bot.telegram.sendMessage(
             OWNER_GROUP_ID,
             `💰 PAYMENT RECEIVED\n\n` +
             `Table: ${table}\n` +
@@ -442,9 +454,10 @@ bot.action(/^paid/, async (ctx) => {
                 }
             }
         )
+        console.log('Owner group message sent successfully')
+    } catch (e) {
+        console.log('Owner group error:', e.message)
     }
-
-    bot.telegram.sendMessage(BARTENDER_GROUP_ID, `✅ PAYMENT COMPLETED\n${table} is now closed`)
 })
 
 // --------------------
