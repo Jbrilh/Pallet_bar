@@ -32,6 +32,17 @@ const AUTHORIZED_GROUPS = [OWNER_GROUP_ID, BARTENDER_GROUP_ID]
 // { 'Table 1': 123456789, 'Table 2': 987654321 }
 const tableUserMap = {}
 
+// Global order counter — resets on bot restart (acceptable for a bar)
+let orderCounter = 0
+function nextOrderNumber() {
+    orderCounter += 1
+    return orderCounter
+}
+
+// Active customer sessions for broadcasting offers
+// { userId: true } — all customers currently ordering
+const activeCustomers = new Set()
+
 // --------------------
 // MENU
 // --------------------
@@ -90,7 +101,8 @@ function buildMainMenu() {
     return Markup.keyboard([
         ...catRows,
         ['🛒 View Cart', '✅ Checkout'],
-        ['🗑 Clear Cart', '🧾 Request Bill']
+        ['🗑 Clear Cart', '🧾 Request Bill'],
+        ['🆘 Call Waiter']
     ]).resize()
 }
 
@@ -125,6 +137,7 @@ bot.use(session({
 // --------------------
 function resetSession(ctx) {
     if (ctx.session.table) delete tableUserMap[ctx.session.table]
+    if (ctx.session.userId) activeCustomers.delete(ctx.session.userId)
     ctx.session.table = null
     ctx.session.cart = []
     ctx.session.tab = []
@@ -239,6 +252,7 @@ async function deductStock(cart) {
 async function sendOrderNotifications(table, customer, roundNumber, cart, userId) {
     const { waitressItems, bartenderItems } = splitCart(cart)
     const waitressGroup = getWaitressGroup(table)
+    const orderNum = nextOrderNumber()
     // Embed userId in orderId so served handler can notify customer
     const orderId = `${table.replace(' ', '')}_R${roundNumber}_U${userId}_${Date.now()}`
 
@@ -254,7 +268,7 @@ async function sendOrderNotifications(table, customer, roundNumber, cart, userId
 
     if (waitressItems.length > 0) {
         const text =
-            `🛎 NEW ORDER - Round ${roundNumber}\n\n` +
+            `🛎 ORDER #${orderNum} - Round ${roundNumber}\n\n` +
             `Table: ${table}\n` +
             `Customer: ${customer}\n\n` +
             `Items:\n${formatItems(waitressItems)}`
@@ -263,7 +277,7 @@ async function sendOrderNotifications(table, customer, roundNumber, cart, userId
 
     if (bartenderItems.length > 0) {
         const text =
-            `🍾 NEW ORDER - Round ${roundNumber}\n\n` +
+            `🍾 ORDER #${orderNum} - Round ${roundNumber}\n\n` +
             `Table: ${table}\n` +
             `Customer: ${customer}\n\n` +
             `Items:\n${formatItems(bartenderItems)}`
@@ -275,6 +289,32 @@ async function sendOrderNotifications(table, customer, roundNumber, cart, userId
 // DASHBOARD URL
 // --------------------
 const DASHBOARD_URL = 'https://zingy-gumption-99ad2b.netlify.app/'
+
+// --------------------
+// CALL WAITER
+// --------------------
+bot.hears('🆘 Call Waiter', async (ctx) => {
+    if (!requireTable(ctx)) return
+
+    const { table } = ctx.session
+    const customer = ctx.from.first_name
+    const waitressGroup = getWaitressGroup(table)
+    const callId = `call_${table.replace(' ', '')}_${Date.now()}`
+
+    await bot.telegram.sendMessage(
+        waitressGroup,
+        `🆘 WAITER NEEDED\n\nTable: ${table}\nCustomer: ${customer}\n\nPlease attend to this table!`,
+        {
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: '✅ On my way!', callback_data: `waiter_ack_${callId}_U${ctx.from.id}` }
+                ]]
+            }
+        }
+    )
+
+    ctx.reply('🆘 Waiter has been called! Someone will be with you shortly.', buildMainMenu())
+})
 
 // --------------------
 // START
@@ -327,6 +367,7 @@ bot.hears(/^Table \d+$/, async (ctx) => {
     ctx.session.table = table
     ctx.session.userId = ctx.from.id   // Save for customer notifications
     tableUserMap[table] = ctx.from.id  // Also store in global map for paid handler
+    activeCustomers.add(ctx.from.id)       // Track for offer broadcasts
     ctx.session.step = 'ordering'
 
     ctx.reply(`✅ You are at ${table}. What would you like to order?`, buildMainMenu())
@@ -595,6 +636,28 @@ bot.action(/^status_/, async (ctx) => {
 // LAUNCH
 // --------------------
 // --------------------
+// WAITER ACKNOWLEDGEMENT
+// --------------------
+bot.action(/^waiter_ack_/, async (ctx) => {
+    const data = ctx.callbackQuery.data
+    const userMatch = data.match(/U(\d+)/)
+
+    await ctx.answerCbQuery('On my way! ✅')
+    await ctx.editMessageText(
+        ctx.callbackQuery.message.text + '\n\n✅ Waitress is on the way!',
+        { reply_markup: { inline_keyboard: [] } }
+    ).catch(() => {})
+
+    // Notify customer
+    if (userMatch) {
+        await bot.telegram.sendMessage(
+            userMatch[1],
+            `✅ Your waiter is on the way!\n\nSomeone will be with you in a moment. 🙂`
+        ).catch(() => {})
+    }
+})
+
+// --------------------
 // DASHBOARD COMMAND (owner group only)
 // --------------------
 bot.command('dashboard', (ctx) => {
@@ -671,7 +734,85 @@ async function sendClosingSummary() {
 
     await bot.telegram.sendMessage(OWNER_GROUP_ID, summary).catch(() => {})
     await bot.telegram.sendMessage(BARTENDER_GROUP_ID, summary).catch(() => {})
+
+    // Shift summaries per waitress group
+    const waitressGroups = [
+        { id: WAITRESS_1_GROUP_ID, tables: ['Table 1', 'Table 2', 'Table 3'], name: 'Waitress 1' },
+        { id: WAITRESS_2_GROUP_ID, tables: ['Table 4', 'Table 5', 'Table 6'], name: 'Waitress 2' }
+    ]
+
+    for (const w of waitressGroups) {
+        const wOrders = orders.filter(o => w.tables.includes(o.table_name))
+        if (!wOrders.length) {
+            await bot.telegram.sendMessage(w.id,
+                `🔒 Shift ended — no tables served tonight. Rest well! 💤`
+            ).catch(() => {})
+            continue
+        }
+
+        const wRevenue = wOrders.reduce((s, o) => s + o.total, 0)
+        const wTableLines = wOrders.map(o =>
+            `  - ${o.table_name} (${o.customer || 'Guest'}): ${o.total.toLocaleString()} ETB`
+        ).join('\n')
+
+        // Items served by this waitress (beers + soft drinks only)
+        const wOrderIds = wOrders.map(o => o.id)
+        const { data: wItems } = await supabase
+            .from('order_items')
+            .select('item_name, qty')
+            .in('order_id', wOrderIds)
+            .in('category', ['Beers 🍺', 'Soft Drinks 🥤'])
+
+        const wItemMap = {}
+        for (const i of wItems || []) {
+            wItemMap[i.item_name] = (wItemMap[i.item_name] || 0) + i.qty
+        }
+        const wItemLines = Object.entries(wItemMap)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, qty]) => `  - ${name}: ${qty}`)
+            .join('\n')
+
+        const wSummary =
+            `🔒 SHIFT SUMMARY — ${w.name}\n\n` +
+            `🪑 Tables served: ${wOrders.length}\n` +
+            `💰 Revenue from your tables: ${wRevenue.toLocaleString()} ETB\n\n` +
+            `📦 Items you served:\n${wItemLines || '  None'}\n\n` +
+            `🪑 Your tables:\n${wTableLines}\n\n` +
+            `Great work tonight! 🙌`
+
+        await bot.telegram.sendMessage(w.id, wSummary).catch(() => {})
+    }
+
+    // Reset order counter for next day
+    orderCounter = 0
 }
+
+// --------------------
+// SPECIAL OFFERS BROADCAST
+// --------------------
+bot.command('offer', async (ctx) => {
+    if (ctx.chat.id !== OWNER_GROUP_ID) return
+
+    const offerText = ctx.message.text.replace('/offer', '').trim()
+    if (!offerText) {
+        return ctx.reply('Please add a message after /offer\nExample: /offer Happy Hour! 50% off all beers until 8pm 🍺')
+    }
+
+    if (!activeCustomers.size) {
+        return ctx.reply('No active customers right now to send the offer to.')
+    }
+
+    let sent = 0
+    for (const userId of activeCustomers) {
+        await bot.telegram.sendMessage(
+            userId,
+            `🎉 SPECIAL OFFER\n\n${offerText}`
+        ).catch(() => {})
+        sent++
+    }
+
+    ctx.reply(`✅ Offer sent to ${sent} active customer${sent !== 1 ? 's' : ''}!`)
+})
 
 // --------------------
 // OPEN / CLOSE COMMANDS
