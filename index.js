@@ -488,9 +488,7 @@ bot.action(/^status_/, async (ctx) => {
 bot.command('dashboard', (ctx) => {
     if (ctx.chat.id !== OWNER_GROUP_ID) return
     ctx.reply(
-        '📊 *Bar Dashboard*
-
-Tap below to open the owner dashboard:',
+        `📊 *Bar Dashboard*\n\nTap below to open the owner dashboard:`,
         {
             parse_mode: 'Markdown',
             reply_markup: {
