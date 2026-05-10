@@ -28,6 +28,10 @@ const OWNER_GROUP_ID      = -5040789601
 let barIsOpen = true
 const AUTHORIZED_GROUPS = [OWNER_GROUP_ID, BARTENDER_GROUP_ID]
 
+// Simple map to track userId per table for customer notifications
+// { 'Table 1': 123456789, 'Table 2': 987654321 }
+const tableUserMap = {}
+
 // --------------------
 // MENU
 // --------------------
@@ -110,6 +114,7 @@ bot.use(session({
         cart: [],
         tab: [],
         orderId: null,   // Supabase order ID for this table visit
+        userId: null,    // Customer's Telegram user ID for direct messages
         step: 'idle',
         activeCategory: null
     })
@@ -119,10 +124,12 @@ bot.use(session({
 // HELPERS
 // --------------------
 function resetSession(ctx) {
+    if (ctx.session.table) delete tableUserMap[ctx.session.table]
     ctx.session.table = null
     ctx.session.cart = []
     ctx.session.tab = []
     ctx.session.orderId = null
+    ctx.session.userId = null
     ctx.session.step = 'idle'
     ctx.session.activeCategory = null
 }
@@ -229,10 +236,11 @@ async function deductStock(cart) {
 // --------------------
 // ORDER NOTIFICATIONS
 // --------------------
-async function sendOrderNotifications(table, customer, roundNumber, cart) {
+async function sendOrderNotifications(table, customer, roundNumber, cart, userId) {
     const { waitressItems, bartenderItems } = splitCart(cart)
     const waitressGroup = getWaitressGroup(table)
-    const orderId = `${table.replace(' ', '')}_R${roundNumber}_${Date.now()}`
+    // Embed userId in orderId so served handler can notify customer
+    const orderId = `${table.replace(' ', '')}_R${roundNumber}_U${userId}_${Date.now()}`
 
     const statusButtons = (id) => ({
         reply_markup: {
@@ -317,6 +325,8 @@ bot.hears(/^Table \d+$/, async (ctx) => {
     const orderId = await createOrder(table, customer)
     ctx.session.orderId = orderId
     ctx.session.table = table
+    ctx.session.userId = ctx.from.id   // Save for customer notifications
+    tableUserMap[table] = ctx.from.id  // Also store in global map for paid handler
     ctx.session.step = 'ordering'
 
     ctx.reply(`✅ You are at ${table}. What would you like to order?`, buildMainMenu())
@@ -403,7 +413,7 @@ bot.hears('✅ Checkout', async (ctx) => {
     if (orderId) await saveRoundItems(orderId, roundNumber, cart)
     await deductStock(cart)
 
-    await sendOrderNotifications(table, customer, roundNumber, cart)
+    await sendOrderNotifications(table, customer, roundNumber, cart, ctx.session.userId)
     ctx.reply(
         `✅ Round ${roundNumber} sent!\n\nKeep ordering or request your bill when ready.`,
         buildMainMenu()
@@ -488,6 +498,16 @@ bot.action(/^paid/, async (ctx) => {
     await bot.telegram.sendMessage(BARTENDER_GROUP_ID, `✅ PAYMENT COMPLETED\n${table} is now closed`)
         .catch(e => console.log('Bartender msg error:', e.message))
 
+    // Thank you message to customer using tableUserMap
+    const customerUserId = tableUserMap[table]
+    if (customerUserId) {
+        await bot.telegram.sendMessage(
+            customerUserId,
+            `✅ You've paid successfully!\n\nThank you for visiting and hope to see you again! 🍻`
+        ).catch(() => {})
+        delete tableUserMap[table]  // Clean up after payment
+    }
+
     // Notify owner group
     console.log(`Sending to owner group: ${OWNER_GROUP_ID}`)
     try {
@@ -542,6 +562,19 @@ bot.action(/^status_/, async (ctx) => {
     const status = statusMap[action]
     if (!status) return ctx.answerCbQuery('Unknown status')
     await ctx.answerCbQuery(status.answer)
+
+    // If served, notify the customer directly
+    if (action === 'served') {
+        // Extract userId from orderId — format: W_TableX_RN_U{userId}_timestamp
+        const userMatch = idParts.match(/U(\d+)/)
+        if (userMatch) {
+            const userId = userMatch[1]
+            await bot.telegram.sendMessage(
+                userId,
+                `🍺 Your order is on its way!\n\nSit tight, your ${staffLabel.toLowerCase()} is bringing it to you now.`
+            ).catch(() => {}) // Silently fail if user blocked the bot
+        }
+    }
 
     const originalText = ctx.callbackQuery.message.text
     const cleanText = originalText.replace(/\n\nStatus:.*$/s, '')
