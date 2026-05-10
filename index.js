@@ -506,7 +506,14 @@ bot.hears('🧾 Request Bill', (ctx) => {
         }
     })
 
-    ctx.reply(`💰 Bill requested! Total: ${total} ETB\nThe bartender will confirm your payment.`)
+    // Build customer-facing bill with full breakdown
+    const customerBill =
+        `🧾 Your Bill\n\n` +
+        `${breakdown}\n\n` +
+        `💰 Total: ${total} ETB\n\n` +
+        `The bartender will confirm your payment shortly.`
+
+    ctx.reply(customerBill)
 })
 
 // --------------------
