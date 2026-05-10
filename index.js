@@ -382,11 +382,12 @@ bot.hears('🧾 Request Bill', (ctx) => {
         `💰 TOTAL: ${total} ETB`
 
     // Pass orderId and total in callback so paid handler can update Supabase
+    // Using | as separator to avoid conflicts with spaces in table names
     bot.telegram.sendMessage(BARTENDER_GROUP_ID, billText, {
         reply_markup: {
             inline_keyboard: [[{
                 text: '💰 PAID',
-                callback_data: `paid_${table}_${orderId}_${total}`
+                callback_data: `paid|${table}|${orderId}|${total}`
             }]]
         }
     })
@@ -397,13 +398,15 @@ bot.hears('🧾 Request Bill', (ctx) => {
 // --------------------
 // PAID
 // --------------------
-bot.action(/^paid_/, async (ctx) => {
+bot.action(/^paid/, async (ctx) => {
     const data = ctx.callbackQuery.data
-    // format: paid_{table}_{orderId}_{total}
-    const parts = data.replace('paid_', '').split('_')
-    const table = parts[0]
-    const orderId = parts[1]
-    const total = parseInt(parts[2]) || 0
+    // format: paid|{table}|{orderId}|{total}
+    const parts = data.split('|')
+    const table = parts[1]
+    const orderId = parts[2]
+    const total = parseInt(parts[3]) || 0
+
+    console.log(`PAID handler: table=${table} orderId=${orderId} total=${total}`)
 
     await ctx.answerCbQuery('Payment confirmed ✅')
     await ctx.editMessageText(
