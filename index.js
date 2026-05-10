@@ -177,6 +177,50 @@ async function markOrderPaid(orderId, total) {
 }
 
 // --------------------
+// STOCK MANAGEMENT
+// --------------------
+async function deductStock(cart) {
+    for (const item of cart) {
+        // Get current stock
+        const { data: stockRows, error } = await supabase
+            .from('stock')
+            .select('id, quantity, low_stock_threshold')
+            .eq('item_name', item.name)
+            .single()
+
+        if (error || !stockRows) continue // item not tracked in stock, skip
+
+        const newQty = Math.max(0, stockRows.quantity - item.qty)
+
+        // Update stock
+        await supabase
+            .from('stock')
+            .update({ quantity: newQty, updated_at: new Date().toISOString() })
+            .eq('id', stockRows.id)
+
+        // Send low stock alert if below threshold
+        if (newQty <= stockRows.low_stock_threshold) {
+            const emoji = newQty === 0 ? '❌' : '⚠️'
+            const status = newQty === 0 ? 'OUT OF STOCK' : 'LOW STOCK'
+            await bot.telegram.sendMessage(
+                OWNER_GROUP_ID,
+                `${emoji} ${status} ALERT
+
+` +
+                `Item: ${item.name}
+` +
+                `Remaining: ${newQty} units
+` +
+                `Threshold: ${stockRows.low_stock_threshold} units
+
+` +
+                `Please restock soon!`
+            ).catch(e => console.log('Stock alert error:', e.message))
+        }
+    }
+}
+
+// --------------------
 // ORDER NOTIFICATIONS
 // --------------------
 async function sendOrderNotifications(table, customer, roundNumber, cart) {
@@ -337,8 +381,9 @@ bot.hears('✅ Checkout', async (ctx) => {
     ctx.session.tab.push({ round: roundNumber, items: [...cart] })
     ctx.session.cart = []
 
-    // Save round to Supabase
+    // Save round to Supabase and deduct from stock
     if (orderId) await saveRoundItems(orderId, roundNumber, cart)
+    await deductStock(cart)
 
     await sendOrderNotifications(table, customer, roundNumber, cart)
     ctx.reply(
