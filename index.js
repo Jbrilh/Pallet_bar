@@ -23,6 +23,12 @@ const WAITRESS_2_GROUP_ID = -5257042379
 const OWNER_GROUP_ID      = -5040789601
 
 // --------------------
+// BAR STATE
+// --------------------
+let barIsOpen = true
+const AUTHORIZED_GROUPS = [OWNER_GROUP_ID, BARTENDER_GROUP_ID]
+
+// --------------------
 // MENU
 // --------------------
 function loadMenu() {
@@ -268,6 +274,13 @@ const DASHBOARD_URL = 'https://zingy-gumption-99ad2b.netlify.app/'
 bot.start((ctx) => {
     if (ctx.chat.type !== 'private') return
     resetSession(ctx)
+
+    if (!barIsOpen) {
+        return ctx.reply(
+            `🚫 The bar is currently closed.\n\nCome back soon! 🍻`
+        )
+    }
+
     ctx.reply(
         `🍻 Welcome!\n\nTap below to pick your table and start ordering 👇`,
         Markup.inlineKeyboard([
@@ -281,6 +294,11 @@ bot.start((ctx) => {
 // --------------------
 bot.action('START_ORDER', async (ctx) => {
     await ctx.answerCbQuery()
+
+    if (!barIsOpen) {
+        return ctx.reply(`🚫 The bar is currently closed. Come back soon! 🍻`)
+    }
+
     ctx.session.step = 'selecting_table'
     ctx.reply('Select your table:', tableKeyboard)
 })
@@ -563,6 +581,91 @@ bot.command('dashboard', (ctx) => {
 
 // Also send dashboard button whenever a payment is completed
 // (already done in paid handler — button added below)
+
+// --------------------
+// CLOSING SUMMARY
+// --------------------
+async function sendClosingSummary() {
+    const today = new Date().toISOString().split('T')[0]
+
+    const { data: orders } = await supabase
+        .from('orders')
+        .select('id, table_name, customer, total')
+        .eq('status', 'paid')
+        .gte('paid_at', `${today}T00:00:00`)
+
+    if (!orders || !orders.length) {
+        const msg = `🔒 BAR CLOSED\n\nNo orders recorded today.`
+        await bot.telegram.sendMessage(OWNER_GROUP_ID, msg).catch(() => {})
+        await bot.telegram.sendMessage(BARTENDER_GROUP_ID, msg).catch(() => {})
+        return
+    }
+
+    const orderIds = orders.map(o => o.id)
+    const { data: items } = await supabase
+        .from('order_items')
+        .select('item_name, qty, price')
+        .in('order_id', orderIds)
+
+    // Total revenue
+    const totalRevenue = orders.reduce((s, o) => s + o.total, 0)
+
+    // Items breakdown
+    const itemMap = {}
+    for (const i of items || []) {
+        if (!itemMap[i.item_name]) itemMap[i.item_name] = { qty: 0, revenue: 0 }
+        itemMap[i.item_name].qty += i.qty
+        itemMap[i.item_name].revenue += i.qty * i.price
+    }
+    const itemLines = Object.entries(itemMap)
+        .sort((a, b) => b[1].qty - a[1].qty)
+        .map(([name, d]) => `  - ${name}: ${d.qty} sold (${d.revenue.toLocaleString()} ETB)`)
+        .join('\n')
+
+    // Per-table summary
+    const tableLines = orders
+        .sort((a, b) => b.total - a.total)
+        .map(o => `  - ${o.table_name} (${o.customer || 'Guest'}): ${o.total.toLocaleString()} ETB`)
+        .join('\n')
+
+    const summary =
+        `🔒 BAR CLOSED — Daily Summary\n\n` +
+        `📅 ${new Date().toLocaleDateString('en-ET', { weekday: 'long', month: 'long', day: 'numeric' })}\n\n` +
+        `💰 Total Revenue: ${totalRevenue.toLocaleString()} ETB\n` +
+        `🪑 Tables Served: ${orders.length}\n\n` +
+        `📦 Items Sold:\n${itemLines}\n\n` +
+        `🪑 Per-Table:\n${tableLines}`
+
+    await bot.telegram.sendMessage(OWNER_GROUP_ID, summary).catch(() => {})
+    await bot.telegram.sendMessage(BARTENDER_GROUP_ID, summary).catch(() => {})
+}
+
+// --------------------
+// OPEN / CLOSE COMMANDS
+// --------------------
+bot.command('open', async (ctx) => {
+    if (!AUTHORIZED_GROUPS.includes(ctx.chat.id)) return
+
+    if (barIsOpen) {
+        return ctx.reply('✅ Bar is already open!')
+    }
+
+    barIsOpen = true
+    await bot.telegram.sendMessage(OWNER_GROUP_ID, '✅ BAR IS NOW OPEN\n\nCustomers can start ordering 🍻').catch(() => {})
+    await bot.telegram.sendMessage(BARTENDER_GROUP_ID, '✅ BAR IS NOW OPEN\n\nCustomers can start ordering 🍻').catch(() => {})
+})
+
+bot.command('close', async (ctx) => {
+    if (!AUTHORIZED_GROUPS.includes(ctx.chat.id)) return
+
+    if (!barIsOpen) {
+        return ctx.reply('🚫 Bar is already closed!')
+    }
+
+    barIsOpen = false
+    ctx.reply('🔒 Closing the bar and generating summary...')
+    await sendClosingSummary()
+})
 
 // Catch-all for debugging — logs ALL callback queries
 bot.on('callback_query', async (ctx) => {
