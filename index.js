@@ -74,6 +74,10 @@ function buildCategoryMenu(categoryName) {
     return Markup.keyboard([...rows, ['⬅️ Back to Menu']]).resize()
 }
 
+bot.on('message', (ctx) => {
+    console.log('Chat ID:', ctx.chat.id, '| Chat title:', ctx.chat.title)
+})
+
 bot.use(session({
     defaultSession: () => ({
         table: null,
