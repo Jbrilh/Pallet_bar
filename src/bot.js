@@ -10,7 +10,9 @@ bot.use(session({
         orderId: null,
         userId: null,
         step: 'idle',
-        activeCategory: null
+        activeCategory: null,
+        isStaffOrder: false,
+        customerName: null
     })
 }))
 

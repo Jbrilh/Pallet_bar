@@ -5,5 +5,9 @@ module.exports = {
     OWNER_GROUP_ID:      -5040789601,
     AUTHORIZED_GROUPS:   [-5040789601, -5098569760],
     WAITRESS_CATEGORIES: ['Beers 🍺', 'Soft Drinks 🥤'],
-    DASHBOARD_URL:       'https://zingy-gumption-99ad2b.netlify.app/'
+    DASHBOARD_URL:       'https://zingy-gumption-99ad2b.netlify.app/',
+
+    // Telegram user IDs allowed to place walk-in orders on behalf of customers.
+    // Find a user's ID by having them message @userinfobot.
+    STAFF_USER_IDS: [5520778680]
 }

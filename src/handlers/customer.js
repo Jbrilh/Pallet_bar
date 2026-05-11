@@ -3,7 +3,7 @@ const { bot } = require('../bot')
 const { state, tableUserMap, activeCustomers } = require('../state')
 const { categories, ITEM_MAP } = require('../menu')
 const { tableKeyboard, buildMainMenu, buildCategoryMenu } = require('../keyboards')
-const { BARTENDER_GROUP_ID } = require('../config')
+const { BARTENDER_GROUP_ID, STAFF_USER_IDS } = require('../config')
 const { createOrder, saveRoundItems } = require('../db/orders')
 const { deductStock } = require('../db/stock')
 const { sendOrderNotifications } = require('../utils/notifications')
@@ -19,6 +19,8 @@ function resetSession(ctx) {
     ctx.session.userId = null
     ctx.session.step = 'idle'
     ctx.session.activeCategory = null
+    ctx.session.isStaffOrder = false
+    ctx.session.customerName = null
 }
 
 function requireTable(ctx) {
@@ -41,6 +43,18 @@ bot.start((ctx) => {
     if (ctx.chat.type !== 'private') return
     resetSession(ctx)
 
+    if (STAFF_USER_IDS.includes(ctx.from.id)) {
+        if (!state.barIsOpen) {
+            return ctx.reply('🚫 The bar is currently closed.')
+        }
+        return ctx.reply(
+            '👨‍🍳 Staff Mode\n\nPlace an order on behalf of a walk-in customer.',
+            Markup.inlineKeyboard([
+                Markup.button.callback('📋 New Walk-in Order', 'STAFF_ORDER')
+            ])
+        )
+    }
+
     if (!state.barIsOpen) {
         return ctx.reply(`🚫 The bar is currently closed.\n\nCome back soon! 🍻`)
     }
@@ -54,7 +68,7 @@ bot.start((ctx) => {
 })
 
 // --------------------
-// START_ORDER
+// START_ORDER (customer)
 // --------------------
 bot.action('START_ORDER', async (ctx) => {
     await ctx.answerCbQuery()
@@ -68,6 +82,22 @@ bot.action('START_ORDER', async (ctx) => {
 })
 
 // --------------------
+// STAFF_ORDER (walk-in)
+// --------------------
+bot.action('STAFF_ORDER', async (ctx) => {
+    await ctx.answerCbQuery()
+
+    if (!state.barIsOpen) {
+        return ctx.reply('🚫 The bar is currently closed.')
+    }
+
+    ctx.session.isStaffOrder = true
+    ctx.session.customerName = 'Walk-in'
+    ctx.session.step = 'selecting_table'
+    ctx.reply('Select the table for this walk-in customer:', tableKeyboard)
+})
+
+// --------------------
 // TABLE SELECTION
 // --------------------
 bot.hears(/^Table \d+$/, async (ctx) => {
@@ -75,17 +105,24 @@ bot.hears(/^Table \d+$/, async (ctx) => {
         return ctx.reply('⚠️ You already have a table. Use the menu below.', buildMainMenu())
     }
     const table = ctx.match[0]
-    const customer = ctx.from.first_name
+    const customer = ctx.session.customerName || ctx.from.first_name
 
     const orderId = await createOrder(table, customer)
     ctx.session.orderId = orderId
     ctx.session.table = table
     ctx.session.userId = ctx.from.id
-    tableUserMap[table] = ctx.from.id
-    activeCustomers.add(ctx.from.id)
     ctx.session.step = 'ordering'
 
-    ctx.reply(`✅ You are at ${table}. What would you like to order?`, buildMainMenu())
+    if (!ctx.session.isStaffOrder) {
+        tableUserMap[table] = ctx.from.id
+        activeCustomers.add(ctx.from.id)
+    }
+
+    const label = ctx.session.isStaffOrder
+        ? `✅ Walk-in order started for ${table}. Add items below.`
+        : `✅ You are at ${table}. What would you like to order?`
+
+    ctx.reply(label, buildMainMenu())
 })
 
 // --------------------
@@ -158,7 +195,7 @@ bot.hears('🗑 Clear Cart', (ctx) => {
 bot.hears('✅ Checkout', async (ctx) => {
     if (!requireTable(ctx)) return
     const { cart, table, orderId } = ctx.session
-    const customer = ctx.from.first_name
+    const customer = ctx.session.customerName || ctx.from.first_name
     if (!cart.length) return ctx.reply('Your cart is empty ❌', buildMainMenu())
 
     const roundNumber = ctx.session.tab.length + 1
@@ -168,9 +205,12 @@ bot.hears('✅ Checkout', async (ctx) => {
     if (orderId) await saveRoundItems(orderId, roundNumber, cart)
     await deductStock(cart)
 
-    await sendOrderNotifications(table, customer, roundNumber, cart, ctx.session.userId)
+    // Pass null as userId for staff orders so no "served" notification is sent to staff
+    const notifyUserId = ctx.session.isStaffOrder ? null : ctx.session.userId
+    await sendOrderNotifications(table, customer, roundNumber, cart, notifyUserId)
+
     ctx.reply(
-        `✅ Round ${roundNumber} sent!\n\nKeep ordering or request your bill when ready.`,
+        `✅ Round ${roundNumber} sent!\n\nKeep ordering or request the bill when ready.`,
         buildMainMenu()
     )
 })
@@ -181,7 +221,7 @@ bot.hears('✅ Checkout', async (ctx) => {
 bot.hears('🧾 Request Bill', (ctx) => {
     if (!requireTable(ctx)) return
     const { cart, table, orderId } = ctx.session
-    const customer = ctx.from.first_name
+    const customer = ctx.session.customerName || ctx.from.first_name
     const tab = ctx.session.tab
     const hasAnything = tab.length > 0 || cart.length > 0
     if (!hasAnything) return ctx.reply('No items on tab yet ❌', buildMainMenu())
@@ -218,13 +258,10 @@ bot.hears('🧾 Request Bill', (ctx) => {
         }
     })
 
-    const customerBill =
-        `🧾 Your Bill\n\n` +
-        `${breakdown}\n\n` +
-        `💰 Total: ${total} ETB\n\n` +
-        `The bartender will confirm your payment shortly.`
-
-    ctx.reply(customerBill)
+    ctx.reply(
+        `🧾 Bill sent to the bartender.\n\n${breakdown}\n\n💰 Total: ${total} ETB`,
+        buildMainMenu()
+    )
 })
 
 // --------------------
@@ -234,7 +271,7 @@ bot.hears('🆘 Call Waiter', async (ctx) => {
     if (!requireTable(ctx)) return
 
     const { table } = ctx.session
-    const customer = ctx.from.first_name
+    const customer = ctx.session.customerName || ctx.from.first_name
     const waitressGroup = getWaitressGroup(table)
     const callId = `call_${table.replace(' ', '')}_${Date.now()}`
 
