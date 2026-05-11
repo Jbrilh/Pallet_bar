@@ -9,5 +9,5 @@ module.exports = {
 
     // Telegram user IDs allowed to place walk-in orders on behalf of customers.
     // Find a user's ID by having them message @userinfobot.
-    STAFF_USER_IDS: [5520778680]
+    STAFF_USER_IDS: []
 }
