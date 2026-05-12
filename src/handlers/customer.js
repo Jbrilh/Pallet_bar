@@ -290,16 +290,17 @@ bot.hears('🆘 Call Waiter', async (ctx) => {
 // --------------------
 // TEXT CATCH-ALL — table selection and category navigation (dynamic)
 // --------------------
-bot.on('text', async (ctx) => {
-    if (ctx.chat.type !== 'private') return
-    if (!ctx.session.barId) return
+bot.on('text', async (ctx, next) => {
+    if (ctx.chat.type !== 'private') return next()
+    if (!ctx.session.barId) return next()
+    if (ctx.message.text.startsWith('/')) return next()
 
     const config = await getBarConfig(ctx.session.barId)
     const text = ctx.message.text
 
     if (ctx.session.step === 'selecting_table') {
         const table = config.tables.find(t => t.table_name === text)
-        if (!table) return
+        if (!table) return next()
         const customer = getCustomerName(ctx)
         const orderId = await createOrder(config.bar.id, table.table_name, customer)
         ctx.session.orderId = orderId
@@ -316,12 +317,14 @@ bot.on('text', async (ctx) => {
         return ctx.reply(label, buildMainMenu(config))
     }
 
-    if (!ctx.session.table) return
+    if (!ctx.session.table) return next()
 
     const category = config.categories.find(c => c.name === text)
     if (category) {
         ctx.session.activeCategoryId = category.id
         ctx.session.step = 'browsing_category'
-        ctx.reply(`${category.name}\n\nChoose an item:`, buildCategoryMenu(category.id, config))
+        return ctx.reply(`${category.name}\n\nChoose an item:`, buildCategoryMenu(category.id, config))
     }
+
+    return next()
 })
