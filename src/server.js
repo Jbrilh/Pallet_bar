@@ -21,8 +21,8 @@ app.use((req, res, next) => {
 // JSON body parser for all routes
 app.use(express.json())
 
-// Telegram webhook — explicit POST handler, compatible with Express 5
-app.post(`/webhook/${process.env.BOT_TOKEN}`, async (req, res) => {
+// Telegram webhook — static path avoids Express 5 treating `:` in bot token as a param
+app.post('/tgwebhook', async (req, res) => {
     const type = req.body?.message?.text || req.body?.callback_query?.data || JSON.stringify(Object.keys(req.body || {}))
     console.log(`📨 Webhook update received: ${type}`)
     try {
@@ -99,7 +99,7 @@ async function startServer() {
             bot.launch()
             return
         }
-        const webhookUrl = `${process.env.WEBHOOK_URL}/webhook/${process.env.BOT_TOKEN}`
+        const webhookUrl = `${process.env.WEBHOOK_URL}/tgwebhook`
         try {
             await bot.telegram.setWebhook(webhookUrl)
             console.log(`🍻 Bot running on port ${PORT} | Webhook → ${webhookUrl}`)
