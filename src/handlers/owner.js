@@ -201,3 +201,17 @@ bot.command('dashboard', async (ctx) => {
         }
     )
 })
+
+// --------------------
+// CHAT ID HELPER
+// --------------------
+bot.command('chatid', (ctx) => {
+    const id = ctx.chat.id
+    const type = ctx.chat.type
+    if (type === 'private') {
+        ctx.reply(`Your Telegram user ID: \`${id}\``, { parse_mode: 'Markdown' })
+    } else {
+        const title = ctx.chat.title || 'this group'
+        ctx.reply(`Chat ID for *${title}*: \`${id}\`\n\nPaste this into the dashboard → Setup tab when adding a group.`, { parse_mode: 'Markdown' })
+    }
+})
