@@ -71,12 +71,13 @@ async function getBarByCode(code) {
 async function getBarByChatId(chatId) {
     if (chatIdCache.has(chatId)) return chatIdCache.get(chatId)
 
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from('bar_groups')
         .select('bar_id')
         .eq('chat_id', chatId)
         .single()
 
+    if (error) console.error(`getBarByChatId(${chatId}) error:`, error.message)
     if (!data) return null
     chatIdCache.set(chatId, data.bar_id)
     return data.bar_id

@@ -18,11 +18,19 @@ app.use((req, res, next) => {
     next()
 })
 
-// Telegram webhook — must come before express.json() so Telegraf parses the body itself
-app.use(bot.webhookCallback(`/webhook/${process.env.BOT_TOKEN}`))
-
-// JSON body parser for /api/* routes
+// JSON body parser for all routes
 app.use(express.json())
+
+// Telegram webhook — explicit POST handler, compatible with Express 5
+app.post(`/webhook/${process.env.BOT_TOKEN}`, async (req, res) => {
+    try {
+        await bot.handleUpdate(req.body)
+        res.sendStatus(200)
+    } catch (e) {
+        console.error('Webhook handler error:', e.message)
+        res.sendStatus(500)
+    }
+})
 
 // ── POST /api/auth ────────────────────────────────────────────
 // Validates Telegram Login Widget data, returns a Supabase JWT
