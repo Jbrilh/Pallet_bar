@@ -143,9 +143,16 @@
 <div id="login-screen">
   <div class="login-card">
     <h1>🍻 Bar Dashboard</h1>
-    <p>Sign in with Telegram to manage your bar</p>
-    <div id="tg-widget-wrap"></div>
-    <p style="font-size:0.75rem;color:var(--muted);text-align:center">Your Telegram account must be the registered<br>owner of a bar to access the dashboard.</p>
+    <p>Enter your bar code to access your dashboard</p>
+    <div style="width:100%">
+      <input id="code-input" type="text" placeholder="Enter bar code"
+        style="width:100%;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--text);font-size:1.1rem;text-align:center;outline:none"
+        onkeydown="if(event.key==='Enter')checkBarCode()">
+    </div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="checkBarCode()">
+      Open Dashboard
+    </button>
+    <div id="code-error" style="color:var(--danger);font-size:0.85rem;display:none">Bar code not found</div>
   </div>
 </div>
 
@@ -311,8 +318,38 @@ let catChart       = null
 let monthlyChart   = null
 let activeTab      = 'today'
 const editStore    = {}
-let supabaseToken  = null  // scoped JWT returned by /api/auth (enables RLS)
+let supabaseToken  = null
 let deepLinkCode   = null
+
+async function checkBarCode() {
+  const code = document.getElementById('code-input').value.trim()
+  if (!code) return
+  document.getElementById('code-error').style.display = 'none'
+  try {
+    const rows = await query('bars', `deep_link_code=eq.${code}&status=eq.approved&select=id,name,is_open,deep_link_code`)
+    if (!rows.length) {
+      document.getElementById('code-error').style.display = 'block'
+      document.getElementById('code-input').value = ''
+      return
+    }
+    localStorage.setItem('bar_code', code)
+    openDashboard(rows[0])
+  } catch (e) {
+    document.getElementById('code-error').textContent = 'Error: ' + e.message
+    document.getElementById('code-error').style.display = 'block'
+  }
+}
+
+function openDashboard(bar) {
+  currentBarId = bar.id
+  deepLinkCode = bar.deep_link_code
+  document.getElementById('header-bar-name').textContent = bar.name
+  updateBarStatus(bar.is_open)
+  document.getElementById('login-screen').style.display = 'none'
+  document.getElementById('app').style.display = 'flex'
+  loadTab('today')
+}
+
 
 // ── SUPABASE REST HELPERS ──────────────────────────────────────
 function apiHeaders() {
@@ -370,6 +407,26 @@ window.onTelegramAuth = async function(user) {
 function renderTelegramWidget() {
   const wrap = document.getElementById('tg-widget-wrap')
   wrap.innerHTML = ''
+
+  const isMobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+
+  if (isMobile || isSafari) {
+    // Safari/mobile: widget popup callback is blocked by cross-origin policy.
+    // Use redirect mode with data-auth-url so Telegram redirects the page with params.
+    const s = document.createElement('script')
+    s.src = 'https://telegram.org/js/telegram-widget.js?22'
+    s.setAttribute('data-telegram-login', 'Palletbar_bot')
+    s.setAttribute('data-size', 'large')
+    s.setAttribute('data-radius', '8')
+    s.setAttribute('data-auth-url', location.origin + location.pathname)
+    s.setAttribute('data-request-access', 'write')
+    s.async = true
+    wrap.appendChild(s)
+    return
+  }
+
+  // Chrome / Firefox / Edge: JS callback works fine
   const s = document.createElement('script')
   s.src = 'https://telegram.org/js/telegram-widget.js?22'
   s.setAttribute('data-telegram-login', 'Palletbar_bot')
@@ -423,7 +480,7 @@ function updateBarStatus(isOpen) {
 }
 
 function logout() {
-  ['tg_user','sb_token','bar_id','bar_name','bar_open','bar_code'].forEach(k => localStorage.removeItem(k))
+  localStorage.removeItem('bar_code')
   location.reload()
 }
 
@@ -431,7 +488,6 @@ function showError(msg) {
   const el = document.getElementById('error-banner')
   el.textContent = msg
   el.style.display = 'block'
-  setTimeout(() => el.style.display = 'none', 5000)
 }
 
 // ── TAB ROUTING ────────────────────────────────────────────────
@@ -1124,32 +1180,14 @@ function esc(s) {
 }
 
 // ── BOOT ────────────────────────────────────────────────────────
-;(function boot() {
-  renderTelegramWidget()
-  const savedUser  = localStorage.getItem('tg_user')
-  const savedToken = localStorage.getItem('sb_token')
-  const savedBarId = localStorage.getItem('bar_id')
-
-  if (!savedUser) return
-
-  if (savedToken && savedBarId) {
-    // Full session already in localStorage — restore without a network call
-    supabaseToken = savedToken
-    deepLinkCode  = localStorage.getItem('bar_code') || null
-    currentBarId  = savedBarId
-    document.getElementById('header-bar-name').textContent = localStorage.getItem('bar_name') || ''
-    updateBarStatus(localStorage.getItem('bar_open') === 'true')
-    document.getElementById('login-screen').style.display = 'none'
-    document.getElementById('app').style.display = 'flex'
-    loadTab('today')
-    return
-  }
-
-  try {
-    const u = JSON.parse(savedUser)
-    initDashboard(u.id, u.first_name)
-  } catch (e) {
-    localStorage.removeItem('tg_user')
+;(async function boot() {
+  const saved = localStorage.getItem('bar_code')
+  if (saved) {
+    try {
+      const rows = await query('bars', `deep_link_code=eq.${saved}&status=eq.approved&select=id,name,is_open,deep_link_code`)
+      if (rows.length) { openDashboard(rows[0]); return }
+    } catch (e) { /* fall through to login */ }
+    localStorage.removeItem('bar_code')
   }
 })()
 </script>

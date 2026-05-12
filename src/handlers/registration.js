@@ -1,5 +1,5 @@
 const { bot } = require('../bot')
-const { SUPER_ADMIN_ID, BOT_USERNAME } = require('../config')
+const { SUPER_ADMIN_ID, BOT_USERNAME, DASHBOARD_URL } = require('../config')
 const { getBarByOwner, createPendingBar, approveBar, rejectBar } = require('../db/bars')
 
 // Intercepts text input when owner is in registration flow
@@ -86,11 +86,14 @@ async function handleBarDecision(ctx, approved) {
         await bot.telegram.sendMessage(
             result.owner_telegram_id,
             `🎉 *Your bar has been approved!*\n\n` +
-            `Bar: *${result.name}*\n\n` +
+            `Bar: *${result.name}*\n` +
+            `Bar code: \`${result.code}\`\n\n` +
             `📲 *Customer QR link:*\n${deepLink}\n\n` +
+            `📊 *Dashboard:*\n${DASHBOARD_URL}\n` +
+            `_(login with your bar code above)_\n\n` +
             `*Next steps:*\n` +
-            `1. Set up your menu on the dashboard\n` +
-            `2. Configure your staff groups\n` +
+            `1. Open the dashboard and log in with your bar code\n` +
+            `2. Set up your menu and staff\n` +
             `3. Print the QR code for your tables`,
             { parse_mode: 'Markdown' }
         )
