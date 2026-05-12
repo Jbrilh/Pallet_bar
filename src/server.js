@@ -23,6 +23,8 @@ app.use(express.json())
 
 // Telegram webhook — explicit POST handler, compatible with Express 5
 app.post(`/webhook/${process.env.BOT_TOKEN}`, async (req, res) => {
+    const type = req.body?.message?.text || req.body?.callback_query?.data || JSON.stringify(Object.keys(req.body || {}))
+    console.log(`📨 Webhook update received: ${type}`)
     try {
         await bot.handleUpdate(req.body)
         res.sendStatus(200)
