@@ -114,6 +114,13 @@ async function sendClosingSummary(barId, config) {
 }
 
 // --------------------
+// DEBUG (remove after confirming group IDs)
+// --------------------
+bot.command('chatid', (ctx) => {
+    ctx.reply(`Chat ID: ${ctx.chat.id}`)
+})
+
+// --------------------
 // OPEN
 // --------------------
 bot.command('open', async (ctx) => {
