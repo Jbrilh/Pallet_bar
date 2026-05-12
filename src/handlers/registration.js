@@ -1,5 +1,5 @@
 const { bot } = require('../bot')
-const { SUPER_ADMIN_ID } = require('../config')
+const { SUPER_ADMIN_ID, BOT_USERNAME } = require('../config')
 const { getBarByOwner, createPendingBar, approveBar, rejectBar } = require('../db/bars')
 
 // Intercepts text input when owner is in registration flow
@@ -82,7 +82,7 @@ async function handleBarDecision(ctx, approved) {
     ).catch(() => {})
 
     if (approved) {
-        const deepLink = `https://t.me/${bot.botInfo?.username}?start=bar_${result.code}`
+        const deepLink = `https://t.me/${BOT_USERNAME}?start=bar_${result.code}`
         await bot.telegram.sendMessage(
             result.owner_telegram_id,
             `🎉 *Your bar has been approved!*\n\n` +

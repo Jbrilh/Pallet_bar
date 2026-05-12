@@ -1,8 +1,11 @@
 const { createClient } = require('@supabase/supabase-js')
 
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://gzwxcdjvezevyvicamgc.supabase.co'
+
+// Service role key bypasses RLS — used by the bot server only, never exposed to clients
 const supabase = createClient(
-    process.env.SUPABASE_URL    || 'https://gzwxcdjvezevyvicamgc.supabase.co',
-    process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd6d3hjZGp2ZXpldnl2aWNhbWdjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzOTgxMzYsImV4cCI6MjA5Mzk3NDEzNn0.-jQhDC2o6Pbb-Nk8Byhs2lMzGks637KwH-6NXsb2Ujg'
+    SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY
 )
 
 module.exports = { supabase }

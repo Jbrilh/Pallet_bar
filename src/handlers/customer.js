@@ -58,7 +58,10 @@ bot.start(async (ctx) => {
 
     const payload = ctx.startPayload
     if (!payload || !payload.startsWith('bar_')) {
-        return ctx.reply('⚠️ Please scan your bar\'s QR code to start ordering.')
+        return ctx.reply(
+            '⚠️ Please scan your bar\'s QR code to start ordering.\n\n' +
+            'Are you a bar owner? Use /register to set up your bar.'
+        )
     }
 
     const code = payload.replace('bar_', '')

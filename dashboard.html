@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bar Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --card2: #22263a;
+    --accent: #f5a623;
+    --accent2: #e8943a;
+    --text: #e8eaf0;
+    --muted: #8b8fa8;
+    --border: #2e3250;
+    --danger: #e05252;
+    --success: #4caf7d;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+
+  /* ── LOGIN ── */
+  #login-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 24px; padding: 24px; }
+  #login-screen h1 { font-size: 2rem; color: var(--accent); }
+  #login-screen p { color: var(--muted); text-align: center; max-width: 320px; }
+  .login-card { background: var(--card); border-radius: var(--radius); padding: 40px 32px; display: flex; flex-direction: column; align-items: center; gap: 20px; border: 1px solid var(--border); }
+
+  /* ── APP SHELL ── */
+  #app { display: none; flex-direction: column; min-height: 100vh; }
+  header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+  header h1 { font-size: 1.1rem; color: var(--accent); font-weight: 700; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .bar-name { font-size: 0.85rem; color: var(--muted); }
+  #bar-status { font-size: 0.75rem; padding: 3px 10px; border-radius: 20px; font-weight: 600; }
+  #bar-status.open { background: rgba(76,175,125,0.2); color: var(--success); }
+  #bar-status.closed { background: rgba(224,82,82,0.2); color: var(--danger); }
+  .logout-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 5px 12px; border-radius: 8px; cursor: pointer; font-size: 0.8rem; }
+  .logout-btn:hover { color: var(--danger); border-color: var(--danger); }
+
+  /* ── TABS ── */
+  .tabs { display: flex; overflow-x: auto; background: var(--card); border-bottom: 1px solid var(--border); padding: 0 12px; gap: 4px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab-btn { background: none; border: none; color: var(--muted); padding: 12px 14px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; border-bottom: 2px solid transparent; transition: all 0.2s; }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn:hover:not(.active) { color: var(--text); }
+
+  /* ── CONTENT ── */
+  main { flex: 1; padding: 20px; max-width: 900px; margin: 0 auto; width: 100%; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ── CARDS ── */
+  .card { background: var(--card); border-radius: var(--radius); padding: 20px; border: 1px solid var(--border); margin-bottom: 16px; }
+  .card h2 { font-size: 1rem; color: var(--muted); margin-bottom: 16px; font-weight: 500; }
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat-card { background: var(--card2); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .label { font-size: 0.75rem; color: var(--muted); margin-bottom: 8px; }
+  .stat-card .value { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+
+  /* ── TABLE ── */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  .data-table th { text-align: left; padding: 10px 12px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── BADGES ── */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+  .badge-green { background: rgba(76,175,125,0.2); color: var(--success); }
+  .badge-red { background: rgba(224,82,82,0.2); color: var(--danger); }
+  .badge-amber { background: rgba(245,166,35,0.2); color: var(--accent); }
+  .badge-muted { background: rgba(139,143,168,0.15); color: var(--muted); }
+
+  /* ── BUTTONS ── */
+  .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 0.875rem; font-weight: 600; transition: opacity 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+  .btn:hover { opacity: 0.85; }
+  .btn:active { opacity: 0.7; }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-sm { padding: 5px 10px; font-size: 0.8rem; border-radius: 6px; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text); }
+  .btn-danger { background: rgba(224,82,82,0.15); color: var(--danger); border: 1px solid rgba(224,82,82,0.3); }
+  .btn-danger:hover { background: rgba(224,82,82,0.25); }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .section-header h2 { font-size: 1rem; color: var(--text); font-weight: 600; }
+
+  /* ── CHART ── */
+  .chart-wrap { position: relative; max-height: 280px; display: flex; justify-content: center; }
+
+  /* ── LOADING ── */
+  .loading { color: var(--muted); text-align: center; padding: 40px; font-size: 0.9rem; }
+
+  /* ── OVERLAY + SLIDE PANEL ── */
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; display: none; }
+  #overlay.show { display: block; }
+  #panel { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card); border-top: 1px solid var(--border); border-radius: 20px 20px 0 0; padding: 24px 20px 32px; z-index: 201; transform: translateY(100%); transition: transform 0.3s cubic-bezier(.4,0,.2,1); max-height: 85vh; overflow-y: auto; max-width: 600px; margin: 0 auto; }
+  #panel.open { transform: translateY(0); }
+  #panel h3 { font-size: 1rem; margin-bottom: 20px; color: var(--accent); }
+  .panel-row { margin-bottom: 16px; }
+  .panel-row label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+  .panel-row input, .panel-row select, .panel-row textarea { width: 100%; background: var(--card2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; color: var(--text); font-size: 0.9rem; outline: none; }
+  .panel-row input:focus, .panel-row select:focus, .panel-row textarea:focus { border-color: var(--accent); }
+  .panel-row select option { background: var(--card2); }
+  .panel-row textarea { resize: vertical; min-height: 80px; }
+  .panel-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .panel-actions .btn { flex: 1; justify-content: center; }
+
+  /* ── STOCK SPECIFIC ── */
+  .stock-low { color: var(--danger); font-weight: 600; }
+  .stock-ok { color: var(--success); }
+  .progress-bar { background: var(--border); border-radius: 4px; height: 6px; overflow: hidden; }
+  .progress-bar .fill { height: 100%; border-radius: 4px; background: var(--success); transition: width 0.3s; }
+  .progress-bar .fill.low { background: var(--danger); }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 600px) {
+    main { padding: 12px; }
+    .stat-card .value { font-size: 1.2rem; }
+    .data-table th, .data-table td { padding: 8px 8px; }
+    header { padding: 10px 14px; }
+  }
+
+  /* ── EMPTY STATE ── */
+  .empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 0.9rem; }
+
+  /* ── TOGGLE ── */
+  .toggle { position: relative; display: inline-block; width: 36px; height: 20px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; cursor: pointer; inset: 0; background: var(--border); border-radius: 20px; transition: 0.3s; }
+  .toggle-slider:before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: 0.3s; }
+  .toggle input:checked + .toggle-slider { background: var(--accent); }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(16px); }
+
+  #error-banner { background: rgba(224,82,82,0.15); border: 1px solid rgba(224,82,82,0.3); color: var(--danger); padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; display: none; font-size: 0.875rem; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ LOGIN SCREEN ═══════════════ -->
+<div id="login-screen">
+  <div class="login-card">
+    <h1>🍻 Bar Dashboard</h1>
+    <p>Sign in with Telegram to manage your bar</p>
+    <div id="tg-widget-wrap"></div>
+    <p style="font-size:0.75rem;color:var(--muted);text-align:center">Your Telegram account must be the registered<br>owner of a bar to access the dashboard.</p>
+  </div>
+</div>
+
+<!-- ═══════════════ APP SHELL ═══════════════ -->
+<div id="app">
+  <header>
+    <h1>🍻 Bar Dashboard</h1>
+    <div class="header-right">
+      <span class="bar-name" id="header-bar-name"></span>
+      <span id="bar-status" class="closed">Closed</span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tab-nav">
+    <button class="tab-btn active" data-tab="today">📊 Today</button>
+    <button class="tab-btn" data-tab="categories">🏷️ Categories</button>
+    <button class="tab-btn" data-tab="tables">🪑 Tables</button>
+    <button class="tab-btn" data-tab="monthly">📅 Monthly</button>
+    <button class="tab-btn" data-tab="stock">📦 Stock</button>
+    <button class="tab-btn" data-tab="menu">🍽️ Menu</button>
+    <button class="tab-btn" data-tab="setup">⚙️ Setup</button>
+    <button class="tab-btn" data-tab="staff">👥 Staff</button>
+    <button class="tab-btn" data-tab="qr">🔗 QR Code</button>
+  </nav>
+
+  <main>
+    <div id="error-banner"></div>
+
+    <!-- TODAY -->
+    <div id="tab-today" class="tab-panel active">
+      <div class="stats-row">
+        <div class="stat-card"><div class="label">Revenue Today</div><div class="value" id="stat-revenue">—</div></div>
+        <div class="stat-card"><div class="label">Orders Paid</div><div class="value" id="stat-orders">—</div></div>
+        <div class="stat-card"><div class="label">Tables Served</div><div class="value" id="stat-tables">—</div></div>
+        <div class="stat-card"><div class="label">Avg Bill</div><div class="value" id="stat-avg">—</div></div>
+      </div>
+      <div class="card">
+        <h2>Recent Paid Orders</h2>
+        <div id="today-orders"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- CATEGORIES -->
+    <div id="tab-categories" class="tab-panel">
+      <div class="card">
+        <h2>Sales by Category</h2>
+        <div class="chart-wrap"><canvas id="cat-chart" height="240"></canvas></div>
+      </div>
+      <div class="card">
+        <div id="cat-table"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- TABLES -->
+    <div id="tab-tables" class="tab-panel">
+      <div class="card">
+        <div id="table-stats"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- MONTHLY -->
+    <div id="tab-monthly" class="tab-panel">
+      <div class="card">
+        <h2>Last 30 Days</h2>
+        <div class="chart-wrap"><canvas id="monthly-chart" height="240"></canvas></div>
+      </div>
+      <div class="card">
+        <div id="monthly-table"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- STOCK -->
+    <div id="tab-stock" class="tab-panel">
+      <div class="card">
+        <div class="section-header">
+          <h2>Stock Levels</h2>
+          <button class="btn btn-primary btn-sm" onclick="openAddStock()">+ Add Item</button>
+        </div>
+        <div id="stock-table"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- MENU -->
+    <div id="tab-menu" class="tab-panel">
+      <div class="card" id="menu-categories-card">
+        <div class="section-header">
+          <h2>Categories</h2>
+          <button class="btn btn-primary btn-sm" onclick="openAddCategory()">+ Add Category</button>
+        </div>
+        <div id="menu-categories"><div class="loading">Loading…</div></div>
+      </div>
+      <div class="card" id="menu-items-card">
+        <div class="section-header">
+          <h2>Menu Items</h2>
+          <button class="btn btn-primary btn-sm" onclick="openAddItem()">+ Add Item</button>
+        </div>
+        <div id="menu-items"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- SETUP -->
+    <div id="tab-setup" class="tab-panel">
+      <div class="card">
+        <div class="section-header">
+          <h2>Telegram Groups</h2>
+          <button class="btn btn-primary btn-sm" onclick="openAddGroup()">+ Add Group</button>
+        </div>
+        <div id="setup-groups"><div class="loading">Loading…</div></div>
+      </div>
+      <div class="card">
+        <div class="section-header">
+          <h2>Tables</h2>
+          <button class="btn btn-primary btn-sm" onclick="openAddTable()">+ Add Table</button>
+        </div>
+        <div id="setup-tables"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- QR CODE -->
+    <div id="tab-qr" class="tab-panel">
+      <div class="card" style="text-align:center">
+        <h2 style="margin-bottom:20px">Customer QR Code</h2>
+        <div id="qr-img-wrap" style="margin:0 auto 20px;display:inline-block;background:#fff;padding:16px;border-radius:12px">
+          <img id="qr-img" src="" alt="QR Code" width="260" height="260" style="display:block">
+        </div>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:12px">Customers scan this to open the ordering bot</p>
+        <a id="qr-link" href="#" target="_blank" style="color:var(--accent);font-size:0.8rem;word-break:break-all;display:block;margin-bottom:20px"></a>
+        <button class="btn btn-primary" onclick="window.print()">🖨️ Print QR</button>
+      </div>
+    </div>
+
+    <!-- STAFF -->
+    <div id="tab-staff" class="tab-panel">
+      <div class="card">
+        <div class="section-header">
+          <h2>Staff Members</h2>
+          <button class="btn btn-primary btn-sm" onclick="openAddStaff()">+ Add Staff</button>
+        </div>
+        <div id="staff-list"><div class="loading">Loading…</div></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══════════════ SLIDE PANEL ═══════════════ -->
+<div id="overlay" onclick="closePanel()"></div>
+<div id="panel">
+  <h3 id="panel-title">Edit</h3>
+  <div id="panel-body"></div>
+</div>
+
+<script>
+const SUPABASE_URL  = 'https://gzwxcdjvezevyvicamgc.supabase.co'
+const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd6d3hjZGp2ZXpldnl2aWNhbWdjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzOTgxMzYsImV4cCI6MjA5Mzk3NDEzNn0.-jQhDC2o6Pbb-Nk8Byhs2lMzGks637KwH-6NXsb2Ujg'
+// ← Paste your Railway app URL here after deploying (e.g. https://app.up.railway.app)
+const API_URL = 'https://telegram-bar-bot-production.up.railway.app'
+
+let currentBarId   = null
+let currentConfig  = { groups: [], categories: [], items: [], tables: [], staff: [] }
+let catChart       = null
+let monthlyChart   = null
+let activeTab      = 'today'
+const editStore    = {}
+let supabaseToken  = null  // scoped JWT returned by /api/auth (enables RLS)
+let deepLinkCode   = null
+
+// ── SUPABASE REST HELPERS ──────────────────────────────────────
+function apiHeaders() {
+  return {
+    'apikey':        SUPABASE_KEY,
+    'Authorization': `Bearer ${supabaseToken || SUPABASE_KEY}`,
+    'Content-Type':  'application/json',
+    'Prefer':        'return=representation'
+  }
+}
+async function query(table, params = '') {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, { headers: apiHeaders() })
+  if (!r.ok) throw new Error(`Query ${table} failed: ${r.status}`)
+  return r.json()
+}
+async function insert(table, body) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, { method: 'POST', headers: apiHeaders(), body: JSON.stringify(body) })
+  if (!r.ok) { const e = await r.json(); throw new Error(e.message || r.status) }
+  return r.json()
+}
+async function update(table, id, body) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, { method: 'PATCH', headers: apiHeaders(), body: JSON.stringify(body) })
+  if (!r.ok) { const e = await r.json(); throw new Error(e.message || r.status) }
+  return r.json()
+}
+async function del(table, id) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, { method: 'DELETE', headers: apiHeaders() })
+  if (!r.ok) throw new Error(`Delete failed: ${r.status}`)
+}
+
+// ── TELEGRAM LOGIN ─────────────────────────────────────────────
+window.onTelegramAuth = async function(user) {
+  localStorage.setItem('tg_user', JSON.stringify(user))
+
+  if (API_URL) {
+    try {
+      const r = await fetch(`${API_URL}/api/auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(user)
+      })
+      const data = await r.json()
+      if (!r.ok) { showError(data.error || 'Login failed'); return }
+      applySession(data)
+    } catch (e) {
+      showError('Could not reach auth server: ' + e.message)
+    }
+    return
+  }
+
+  // API_URL not set — fall back to direct Supabase lookup (no RLS)
+  await initDashboard(user.id, user.first_name)
+}
+
+function renderTelegramWidget() {
+  const wrap = document.getElementById('tg-widget-wrap')
+  wrap.innerHTML = ''
+  const s = document.createElement('script')
+  s.src = 'https://telegram.org/js/telegram-widget.js?22'
+  s.setAttribute('data-telegram-login', 'Palletbar_bot')
+  s.setAttribute('data-size', 'large')
+  s.setAttribute('data-radius', '8')
+  s.setAttribute('data-onauth', 'onTelegramAuth(user)')
+  s.setAttribute('data-request-access', 'write')
+  s.async = true
+  wrap.appendChild(s)
+}
+
+function applySession({ token, bar }) {
+  supabaseToken = token
+  deepLinkCode  = bar.deep_link_code
+  currentBarId  = bar.id
+  localStorage.setItem('sb_token',   token || '')
+  localStorage.setItem('bar_id',     bar.id)
+  localStorage.setItem('bar_name',   bar.name)
+  localStorage.setItem('bar_open',   bar.is_open)
+  localStorage.setItem('bar_code',   bar.deep_link_code || '')
+  document.getElementById('header-bar-name').textContent = bar.name
+  updateBarStatus(bar.is_open)
+  document.getElementById('login-screen').style.display = 'none'
+  document.getElementById('app').style.display = 'flex'
+  loadTab('today')
+}
+
+async function initDashboard(telegramId, name) {
+  try {
+    const bars = await query('bars', `owner_telegram_id=eq.${telegramId}&select=id,name,is_open`)
+    if (!bars.length) {
+      showError('No bar found for your Telegram account. Contact support.')
+      return
+    }
+    const bar = bars[0]
+    currentBarId = bar.id
+    document.getElementById('header-bar-name').textContent = bar.name
+    updateBarStatus(bar.is_open)
+    document.getElementById('login-screen').style.display = 'none'
+    document.getElementById('app').style.display = 'flex'
+    loadTab('today')
+  } catch (e) {
+    showError('Login failed: ' + e.message)
+  }
+}
+
+function updateBarStatus(isOpen) {
+  const el = document.getElementById('bar-status')
+  el.textContent = isOpen ? 'Open' : 'Closed'
+  el.className = isOpen ? 'open' : 'closed'
+}
+
+function logout() {
+  ['tg_user','sb_token','bar_id','bar_name','bar_open','bar_code'].forEach(k => localStorage.removeItem(k))
+  location.reload()
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-banner')
+  el.textContent = msg
+  el.style.display = 'block'
+  setTimeout(() => el.style.display = 'none', 5000)
+}
+
+// ── TAB ROUTING ────────────────────────────────────────────────
+document.getElementById('tab-nav').addEventListener('click', e => {
+  const btn = e.target.closest('.tab-btn')
+  if (!btn) return
+  const tab = btn.dataset.tab
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'))
+  btn.classList.add('active')
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'))
+  document.getElementById('tab-' + tab).classList.add('active')
+  activeTab = tab
+  loadTab(tab)
+})
+
+function loadTab(tab) {
+  if (tab === 'today')      loadToday()
+  else if (tab === 'categories') loadCategories()
+  else if (tab === 'tables')     loadTableStats()
+  else if (tab === 'monthly')    loadMonthly()
+  else if (tab === 'stock')      loadStock()
+  else if (tab === 'menu')       loadMenu()
+  else if (tab === 'setup')      loadSetup()
+  else if (tab === 'staff')      loadStaff()
+  else if (tab === 'qr')         loadQR()
+}
+
+// ── QR CODE ────────────────────────────────────────────────────
+function loadQR() {
+  const code = deepLinkCode || localStorage.getItem('bar_code')
+  if (!code) {
+    document.getElementById('qr-img-wrap').innerHTML = '<p style="color:var(--muted);padding:20px">QR code not available.<br>Make sure your bar is approved.</p>'
+    return
+  }
+  const url = `https://t.me/Palletbar_bot?start=bar_${code}`
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(url)}`
+  document.getElementById('qr-img').src  = qrSrc
+  document.getElementById('qr-link').textContent = url
+  document.getElementById('qr-link').href        = url
+}
+
+// ── TODAY ──────────────────────────────────────────────────────
+async function loadToday() {
+  const today = new Date().toISOString().split('T')[0]
+  try {
+    const orders = await query('orders', `bar_id=eq.${currentBarId}&status=eq.paid&paid_at=gte.${today}T00:00:00&select=id,table_name,customer,total,paid_at&order=paid_at.desc`)
+    const rev = orders.reduce((s, o) => s + o.total, 0)
+    const tables = new Set(orders.map(o => o.table_name)).size
+    document.getElementById('stat-revenue').textContent = rev.toLocaleString() + ' ETB'
+    document.getElementById('stat-orders').textContent  = orders.length
+    document.getElementById('stat-tables').textContent  = tables
+    document.getElementById('stat-avg').textContent     = orders.length ? Math.round(rev / orders.length).toLocaleString() + ' ETB' : '—'
+
+    if (!orders.length) {
+      document.getElementById('today-orders').innerHTML = '<div class="empty">No paid orders today yet.</div>'
+      return
+    }
+    document.getElementById('today-orders').innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Time</th><th>Table</th><th>Customer</th><th>Total</th></tr></thead>
+        <tbody>${orders.map(o => `
+          <tr>
+            <td>${new Date(o.paid_at).toLocaleTimeString('en-ET',{hour:'2-digit',minute:'2-digit'})}</td>
+            <td>${o.table_name}</td>
+            <td>${o.customer || 'Guest'}</td>
+            <td><strong>${o.total.toLocaleString()} ETB</strong></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`
+  } catch (e) { document.getElementById('today-orders').innerHTML = `<div class="empty">Error: ${e.message}</div>` }
+}
+
+// ── CATEGORIES ─────────────────────────────────────────────────
+async function loadCategories() {
+  const today = new Date().toISOString().split('T')[0]
+  try {
+    const items = await query('order_items', `bar_id=eq.${currentBarId}&created_at=gte.${today}T00:00:00&select=category,qty,price`)
+    const map = {}
+    for (const i of items) {
+      if (!map[i.category]) map[i.category] = { qty: 0, revenue: 0 }
+      map[i.category].qty += i.qty
+      map[i.category].revenue += i.qty * i.price
+    }
+    const entries = Object.entries(map).sort((a,b) => b[1].revenue - a[1].revenue)
+    if (!entries.length) {
+      document.getElementById('cat-table').innerHTML = '<div class="empty">No sales data today.</div>'
+      destroyChart('catChart', 'cat-chart')
+      return
+    }
+    const colors = ['#f5a623','#e05252','#4caf7d','#5b8dee','#a78bfa','#fb923c','#34d399','#f472b6']
+    renderDoughnut('cat-chart', entries.map(([k]) => k), entries.map(([,v]) => v.revenue), colors)
+    document.getElementById('cat-table').innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Category</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
+        <tbody>${entries.map(([cat, d], i) => `
+          <tr>
+            <td><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colors[i%colors.length]};margin-right:8px"></span>${cat}</td>
+            <td>${d.qty}</td>
+            <td><strong>${d.revenue.toLocaleString()} ETB</strong></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`
+  } catch (e) { document.getElementById('cat-table').innerHTML = `<div class="empty">Error: ${e.message}</div>` }
+}
+
+function renderDoughnut(canvasId, labels, data, colors) {
+  const ctx = document.getElementById(canvasId).getContext('2d')
+  if (catChart) { catChart.destroy(); catChart = null }
+  catChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 2, borderColor: '#1a1d27' }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#8b8fa8', font: { size: 12 } } } } }
+  })
+}
+
+// ── TABLE STATS ────────────────────────────────────────────────
+async function loadTableStats() {
+  const today = new Date().toISOString().split('T')[0]
+  try {
+    const orders = await query('orders', `bar_id=eq.${currentBarId}&status=eq.paid&paid_at=gte.${today}T00:00:00&select=table_name,total`)
+    const map = {}
+    for (const o of orders) {
+      if (!map[o.table_name]) map[o.table_name] = { count: 0, revenue: 0 }
+      map[o.table_name].count++
+      map[o.table_name].revenue += o.total
+    }
+    const entries = Object.entries(map).sort((a,b) => b[1].revenue - a[1].revenue)
+    if (!entries.length) {
+      document.getElementById('table-stats').innerHTML = '<div class="empty">No table data today.</div>'
+      return
+    }
+    const maxRev = Math.max(...entries.map(([,v]) => v.revenue))
+    document.getElementById('table-stats').innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Table</th><th>Orders</th><th>Revenue</th><th style="width:120px">Share</th></tr></thead>
+        <tbody>${entries.map(([table, d]) => `
+          <tr>
+            <td><strong>${table}</strong></td>
+            <td>${d.count}</td>
+            <td>${d.revenue.toLocaleString()} ETB</td>
+            <td>
+              <div class="progress-bar"><div class="fill" style="width:${Math.round(d.revenue/maxRev*100)}%"></div></div>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`
+  } catch (e) { document.getElementById('table-stats').innerHTML = `<div class="empty">Error: ${e.message}</div>` }
+}
+
+// ── MONTHLY ────────────────────────────────────────────────────
+async function loadMonthly() {
+  const from = new Date(); from.setDate(from.getDate() - 29)
+  const fromStr = from.toISOString().split('T')[0]
+  try {
+    const orders = await query('orders', `bar_id=eq.${currentBarId}&status=eq.paid&paid_at=gte.${fromStr}T00:00:00&select=total,paid_at`)
+    const map = {}
+    for (const o of orders) {
+      const d = o.paid_at.split('T')[0]
+      if (!map[d]) map[d] = { count: 0, revenue: 0 }
+      map[d].count++
+      map[d].revenue += o.total
+    }
+    const days = []
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(); d.setDate(d.getDate() - i)
+      days.push(d.toISOString().split('T')[0])
+    }
+    const labels  = days.map(d => d.slice(5))
+    const revenues = days.map(d => map[d]?.revenue || 0)
+    renderBar('monthly-chart', labels, revenues)
+    const totalRev = revenues.reduce((a,b) => a+b, 0)
+    const totalOrd = orders.length
+    document.getElementById('monthly-table').innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Date</th><th>Orders</th><th>Revenue</th></tr></thead>
+        <tbody>
+          ${days.filter(d => map[d]).sort((a,b) => b > a ? 1 : -1).slice(0,15).map(d => `
+          <tr>
+            <td>${d}</td>
+            <td>${map[d].count}</td>
+            <td><strong>${map[d].revenue.toLocaleString()} ETB</strong></td>
+          </tr>`).join('')}
+          <tr style="font-weight:700">
+            <td>Total (30d)</td><td>${totalOrd}</td><td>${totalRev.toLocaleString()} ETB</td>
+          </tr>
+        </tbody>
+      </table>`
+  } catch (e) { document.getElementById('monthly-table').innerHTML = `<div class="empty">Error: ${e.message}</div>` }
+}
+
+function renderBar(canvasId, labels, data) {
+  const ctx = document.getElementById(canvasId).getContext('2d')
+  if (monthlyChart) { monthlyChart.destroy(); monthlyChart = null }
+  monthlyChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Revenue (ETB)', data, backgroundColor: 'rgba(245,166,35,0.7)', borderColor: '#f5a623', borderWidth: 1, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b8fa8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#8b8fa8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.06)' } }
+      }
+    }
+  })
+}
+
+// ── STOCK ──────────────────────────────────────────────────────
+async function loadStock() {
+  try {
+    const rows = await query('stock', `bar_id=eq.${currentBarId}&order=item_name.asc`)
+    currentConfig.stock = rows
+    if (!rows.length) {
+      document.getElementById('stock-table').innerHTML = '<div class="empty">No stock items yet. Add one above.</div>'
+      return
+    }
+    document.getElementById('stock-table').innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Item</th><th>Qty</th><th>Low Threshold</th><th>Level</th><th></th></tr></thead>
+        <tbody>${rows.map(r => {
+          const pct = r.low_stock_threshold > 0 ? Math.min(100, Math.round(r.quantity / r.low_stock_threshold * 100)) : 100
+          const isLow = r.quantity <= r.low_stock_threshold
+          return `<tr>
+            <td><strong>${r.item_name}</strong></td>
+            <td class="${isLow ? 'stock-low' : 'stock-ok'}">${r.quantity}</td>
+            <td>${r.low_stock_threshold}</td>
+            <td style="min-width:80px"><div class="progress-bar"><div class="fill ${isLow?'low':''}" style="width:${pct}%"></div></div></td>
+            <td>
+              <button class="btn btn-ghost btn-sm" onclick="openEditStock('${r.id}')">Edit</button>
+            </td>
+          </tr>`}).join('')}
+        </tbody>
+      </table>`
+  } catch (e) { document.getElementById('stock-table').innerHTML = `<div class="empty">Error: ${e.message}</div>` }
+}
+
+function openAddStock() {
+  openPanel('Add Stock Item', `
+    <div class="panel-row"><label>Item Name</label><input id="p-item-name" placeholder="e.g. Heineken 500ml"></div>
+    <div class="panel-row"><label>Quantity</label><input id="p-qty" type="number" min="0" value="0"></div>
+    <div class="panel-row"><label>Low Stock Threshold</label><input id="p-threshold" type="number" min="0" value="5"></div>
+    <div class="panel-actions">
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStock()">Save</button>
+    </div>`)
+}
+
+function openEditStock(id) {
+  const r = currentConfig.stock.find(s => s.id === id)
+  if (!r) return
+  editStore[id] = r
+  openPanel('Edit Stock Item', `
+    <div class="panel-row"><label>Item Name</label><input id="p-item-name" value="${esc(r.item_name)}"></div>
+    <div class="panel-row"><label>Quantity</label><input id="p-qty" type="number" min="0" value="${r.quantity}"></div>
+    <div class="panel-row"><label>Low Stock Threshold</label><input id="p-threshold" type="number" min="0" value="${r.low_stock_threshold}"></div>
+    <div class="panel-actions">
+      <button class="btn btn-danger" onclick="deleteStock('${id}')">Delete</button>
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStock('${id}')">Save</button>
+    </div>`)
+}
+
+async function saveStock(id) {
+  const name = document.getElementById('p-item-name').value.trim()
+  const qty  = parseInt(document.getElementById('p-qty').value) || 0
+  const thr  = parseInt(document.getElementById('p-threshold').value) || 0
+  if (!name) return alert('Item name required')
+  try {
+    if (id) await update('stock', id, { item_name: name, quantity: qty, low_stock_threshold: thr })
+    else    await insert('stock', { bar_id: currentBarId, item_name: name, quantity: qty, low_stock_threshold: thr })
+    closePanel(); loadStock()
+  } catch (e) { alert('Error: ' + e.message) }
+}
+
+async function deleteStock(id) {
+  if (!confirm('Delete this stock item?')) return
+  try { await del('stock', id); closePanel(); loadStock() }
+  catch (e) { alert('Error: ' + e.message) }
+}
+
+// ── MENU ───────────────────────────────────────────────────────
+async function loadMenu() {
+  try {
+    const [cats, items, groups] = await Promise.all([
+      query('bar_menu_categories', `bar_id=eq.${currentBarId}&order=sort_order.asc`),
+      query('bar_menu_items',      `bar_id=eq.${currentBarId}&order=sort_order.asc`),
+      query('bar_groups',          `bar_id=eq.${currentBarId}&select=id,label,type`)
+    ])
+    currentConfig.categories = cats
+    currentConfig.items = items
+    currentConfig.groups = groups
+
+    const groupMap = Object.fromEntries(groups.map(g => [g.id, g]))
+    const catMap   = Object.fromEntries(cats.map(c => [c.id, c]))
+
+    // Categories
+    if (!cats.length) {
+      document.getElementById('menu-categories').innerHTML = '<div class="empty">No categories yet.</div>'
+    } else {
+      document.getElementById('menu-categories').innerHTML = `
+        <table class="data-table">
+          <thead><tr><th>Order</th><th>Name</th><th>Routes To</th><th></th></tr></thead>
+          <tbody>${cats.map(c => `
+            <tr>
+              <td>${c.sort_order}</td>
+              <td><strong>${c.name}</strong></td>
+              <td>${c.routes_to_group_id ? (groupMap[c.routes_to_group_id]?.label || '—') : '<span class="badge badge-muted">Unrouted</span>'}</td>
+              <td><button class="btn btn-ghost btn-sm" onclick="openEditCategory('${c.id}')">Edit</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`
+    }
+
+    // Items
+    if (!items.length) {
+      document.getElementById('menu-items').innerHTML = '<div class="empty">No menu items yet.</div>'
+    } else {
+      document.getElementById('menu-items').innerHTML = `
+        <table class="data-table">
+          <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Available</th><th></th></tr></thead>
+          <tbody>${items.map(i => `
+            <tr>
+              <td><strong>${i.name}</strong></td>
+              <td>${catMap[i.category_id]?.name || '—'}</td>
+              <td>${i.price.toLocaleString()} ETB</td>
+              <td>
+                <label class="toggle">
+                  <input type="checkbox" ${i.is_available ? 'checked' : ''} onchange="toggleItem('${i.id}', this.checked)">
+                  <span class="toggle-slider"></span>
+                </label>
+              </td>
+              <td><button class="btn btn-ghost btn-sm" onclick="openEditItem('${i.id}')">Edit</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`
+    }
+  } catch (e) {
+    document.getElementById('menu-categories').innerHTML = `<div class="empty">Error: ${e.message}</div>`
+  }
+}
+
+async function toggleItem(id, available) {
+  try { await update('bar_menu_items', id, { is_available: available }) }
+  catch (e) { alert('Error: ' + e.message); loadMenu() }
+}
+
+function openAddCategory() {
+  openPanel('Add Category', buildCategoryForm())
+}
+
+function openEditCategory(id) {
+  const c = currentConfig.categories.find(x => x.id === id)
+  if (!c) return
+  editStore[id] = c
+  openPanel('Edit Category', buildCategoryForm(c) + `
+    <div class="panel-actions">
+      <button class="btn btn-danger" onclick="deleteCategory('${id}')">Delete</button>
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCategory('${id}')">Save</button>
+    </div>`)
+}
+
+function buildCategoryForm(c = {}) {
+  const groupOptions = currentConfig.groups.map(g =>
+    `<option value="${g.id}" ${c.routes_to_group_id === g.id ? 'selected' : ''}>${g.label} (${g.type})</option>`
+  ).join('')
+  const form = `
+    <div class="panel-row"><label>Category Name</label><input id="p-cat-name" value="${esc(c.name||'')}"></div>
+    <div class="panel-row"><label>Sort Order</label><input id="p-cat-order" type="number" value="${c.sort_order||1}"></div>
+    <div class="panel-row"><label>Routes To Group</label>
+      <select id="p-cat-group"><option value="">— None —</option>${groupOptions}</select>
+    </div>`
+  if (!c.id) return form + `<div class="panel-actions">
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCategory()">Save</button>
+    </div>`
+  return form
+}
+
+async function saveCategory(id) {
+  const name  = document.getElementById('p-cat-name').value.trim()
+  const order = parseInt(document.getElementById('p-cat-order').value) || 1
+  const group = document.getElementById('p-cat-group').value || null
+  if (!name) return alert('Category name required')
+  try {
+    if (id) await update('bar_menu_categories', id, { name, sort_order: order, routes_to_group_id: group })
+    else    await insert('bar_menu_categories', { bar_id: currentBarId, name, sort_order: order, routes_to_group_id: group })
+    closePanel(); loadMenu()
+  } catch (e) { alert('Error: ' + e.message) }
+}
+
+async function deleteCategory(id) {
+  if (!confirm('Delete this category? Items in it will be unlinked.')) return
+  try { await del('bar_menu_categories', id); closePanel(); loadMenu() }
+  catch (e) { alert('Error: ' + e.message) }
+}
+
+function openAddItem() {
+  openPanel('Add Menu Item', buildItemForm())
+}
+
+function openEditItem(id) {
+  const item = currentConfig.items.find(x => x.id === id)
+  if (!item) return
+  editStore[id] = item
+  openPanel('Edit Menu Item', buildItemForm(item) + `
+    <div class="panel-actions">
+      <button class="btn btn-danger" onclick="deleteItem('${id}')">Delete</button>
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveItem('${id}')">Save</button>
+    </div>`)
+}
+
+function buildItemForm(item = {}) {
+  const catOptions = currentConfig.categories.map(c =>
+    `<option value="${c.id}" ${item.category_id === c.id ? 'selected' : ''}>${c.name}</option>`
+  ).join('')
+  const form = `
+    <div class="panel-row"><label>Item Name</label><input id="p-item-name2" value="${esc(item.name||'')}"></div>
+    <div class="panel-row"><label>Price (ETB)</label><input id="p-item-price" type="number" min="0" value="${item.price||''}"></div>
+    <div class="panel-row"><label>Category</label>
+      <select id="p-item-cat"><option value="">— Select —</option>${catOptions}</select>
+    </div>
+    <div class="panel-row"><label>Sort Order</label><input id="p-item-order" type="number" value="${item.sort_order||1}"></div>`
+  if (!item.id) return form + `<div class="panel-actions">
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveItem()">Save</button>
+    </div>`
+  return form
+}
+
+async function saveItem(id) {
+  const name  = document.getElementById('p-item-name2').value.trim()
+  const price = parseFloat(document.getElementById('p-item-price').value) || 0
+  const catId = document.getElementById('p-item-cat').value || null
+  const order = parseInt(document.getElementById('p-item-order').value) || 1
+  if (!name) return alert('Item name required')
+  if (!catId) return alert('Select a category')
+  try {
+    if (id) await update('bar_menu_items', id, { name, price, category_id: catId, sort_order: order })
+    else    await insert('bar_menu_items', { bar_id: currentBarId, name, price, category_id: catId, sort_order: order, is_available: true })
+    closePanel(); loadMenu()
+  } catch (e) { alert('Error: ' + e.message) }
+}
+
+async function deleteItem(id) {
+  if (!confirm('Delete this menu item?')) return
+  try { await del('bar_menu_items', id); closePanel(); loadMenu() }
+  catch (e) { alert('Error: ' + e.message) }
+}
+
+// ── SETUP ──────────────────────────────────────────────────────
+async function loadSetup() {
+  try {
+    const [groups, tables] = await Promise.all([
+      query('bar_groups', `bar_id=eq.${currentBarId}&order=type.asc`),
+      query('bar_tables', `bar_id=eq.${currentBarId}&order=table_name.asc`)
+    ])
+    currentConfig.groups = groups
+    currentConfig.tables = tables
+    const groupMap = Object.fromEntries(groups.map(g => [g.id, g]))
+
+    // Groups
+    if (!groups.length) {
+      document.getElementById('setup-groups').innerHTML = '<div class="empty">No groups configured yet.</div>'
+    } else {
+      document.getElementById('setup-groups').innerHTML = `
+        <table class="data-table">
+          <thead><tr><th>Label</th><th>Type</th><th>Chat ID</th><th></th></tr></thead>
+          <tbody>${groups.map(g => `
+            <tr>
+              <td><strong>${g.label}</strong></td>
+              <td><span class="badge badge-muted">${g.type}</span></td>
+              <td><code style="font-size:0.8rem;color:var(--muted)">${g.chat_id}</code></td>
+              <td><button class="btn btn-ghost btn-sm" onclick="openEditGroup('${g.id}')">Edit</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`
+    }
+
+    // Tables
+    if (!tables.length) {
+      document.getElementById('setup-tables').innerHTML = '<div class="empty">No tables configured yet.</div>'
+    } else {
+      document.getElementById('setup-tables').innerHTML = `
+        <table class="data-table">
+          <thead><tr><th>Table Name</th><th>Assigned Group</th><th></th></tr></thead>
+          <tbody>${tables.map(t => `
+            <tr>
+              <td><strong>${t.table_name}</strong></td>
+              <td>${t.group_id ? (groupMap[t.group_id]?.label || '—') : '<span class="badge badge-muted">Unassigned</span>'}</td>
+              <td><button class="btn btn-ghost btn-sm" onclick="openEditTable('${t.id}')">Edit</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`
+    }
+  } catch (e) {
+    document.getElementById('setup-groups').innerHTML = `<div class="empty">Error: ${e.message}</div>`
+  }
+}
+
+function openAddGroup() {
+  openPanel('Add Telegram Group', buildGroupForm())
+}
+
+function openEditGroup(id) {
+  const g = currentConfig.groups.find(x => x.id === id)
+  if (!g) return
+  editStore[id] = g
+  openPanel('Edit Group', buildGroupForm(g) + `
+    <div class="panel-actions">
+      <button class="btn btn-danger" onclick="deleteGroup('${id}')">Delete</button>
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveGroup('${id}')">Save</button>
+    </div>`)
+}
+
+function buildGroupForm(g = {}) {
+  const typeOptions = ['owner','bartender','waitress'].map(t =>
+    `<option value="${t}" ${g.type === t ? 'selected' : ''}>${t}</option>`
+  ).join('')
+  const form = `
+    <div class="panel-row"><label>Label</label><input id="p-g-label" value="${esc(g.label||'')}" placeholder="e.g. Waitress Zone A"></div>
+    <div class="panel-row"><label>Type</label><select id="p-g-type">${typeOptions}</select></div>
+    <div class="panel-row"><label>Telegram Chat ID</label><input id="p-g-chatid" value="${g.chat_id||''}" placeholder="-1001234567890"><small style="color:var(--muted);font-size:0.75rem">Send /chatid in the group to get the ID</small></div>`
+  if (!g.id) return form + `<div class="panel-actions">
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveGroup()">Save</button>
+    </div>`
+  return form
+}
+
+async function saveGroup(id) {
+  const label  = document.getElementById('p-g-label').value.trim()
+  const type   = document.getElementById('p-g-type').value
+  const chatId = parseInt(document.getElementById('p-g-chatid').value) || null
+  if (!label) return alert('Label required')
+  if (!chatId) return alert('Chat ID required')
+  try {
+    if (id) await update('bar_groups', id, { label, type, chat_id: chatId })
+    else    await insert('bar_groups', { bar_id: currentBarId, label, type, chat_id: chatId })
+    closePanel(); loadSetup()
+  } catch (e) { alert('Error: ' + e.message) }
+}
+
+async function deleteGroup(id) {
+  if (!confirm('Delete this group?')) return
+  try { await del('bar_groups', id); closePanel(); loadSetup() }
+  catch (e) { alert('Error: ' + e.message) }
+}
+
+function openAddTable() {
+  openPanel('Add Table', buildTableForm())
+}
+
+function openEditTable(id) {
+  const t = currentConfig.tables.find(x => x.id === id)
+  if (!t) return
+  editStore[id] = t
+  openPanel('Edit Table', buildTableForm(t) + `
+    <div class="panel-actions">
+      <button class="btn btn-danger" onclick="deleteTable('${id}')">Delete</button>
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTable('${id}')">Save</button>
+    </div>`)
+}
+
+function buildTableForm(t = {}) {
+  const groupOptions = currentConfig.groups
+    .filter(g => g.type === 'waitress' || g.type === 'bartender')
+    .map(g => `<option value="${g.id}" ${t.group_id === g.id ? 'selected' : ''}>${g.label}</option>`).join('')
+  const form = `
+    <div class="panel-row"><label>Table Name</label><input id="p-t-name" value="${esc(t.table_name||'')}" placeholder="e.g. Table 1"></div>
+    <div class="panel-row"><label>Assigned Group (waitress/staff)</label>
+      <select id="p-t-group"><option value="">— None —</option>${groupOptions}</select>
+    </div>`
+  if (!t.id) return form + `<div class="panel-actions">
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTable()">Save</button>
+    </div>`
+  return form
+}
+
+async function saveTable(id) {
+  const name    = document.getElementById('p-t-name').value.trim()
+  const groupId = document.getElementById('p-t-group').value || null
+  if (!name) return alert('Table name required')
+  try {
+    if (id) await update('bar_tables', id, { table_name: name, group_id: groupId })
+    else    await insert('bar_tables', { bar_id: currentBarId, table_name: name, group_id: groupId })
+    closePanel(); loadSetup()
+  } catch (e) { alert('Error: ' + e.message) }
+}
+
+async function deleteTable(id) {
+  if (!confirm('Delete this table?')) return
+  try { await del('bar_tables', id); closePanel(); loadSetup() }
+  catch (e) { alert('Error: ' + e.message) }
+}
+
+// ── STAFF ──────────────────────────────────────────────────────
+async function loadStaff() {
+  try {
+    const rows = await query('bar_staff', `bar_id=eq.${currentBarId}&order=name.asc`)
+    currentConfig.staff = rows
+    if (!rows.length) {
+      document.getElementById('staff-list').innerHTML = '<div class="empty">No staff members yet. Add one above.</div>'
+      return
+    }
+    document.getElementById('staff-list').innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Name</th><th>Role</th><th>Telegram ID</th><th></th></tr></thead>
+        <tbody>${rows.map(s => `
+          <tr>
+            <td><strong>${s.name || '—'}</strong></td>
+            <td><span class="badge badge-muted">${s.role || 'staff'}</span></td>
+            <td><code style="font-size:0.8rem;color:var(--muted)">${s.telegram_user_id}</code></td>
+            <td><button class="btn btn-ghost btn-sm" onclick="openEditStaff('${s.id}')">Edit</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`
+  } catch (e) { document.getElementById('staff-list').innerHTML = `<div class="empty">Error: ${e.message}</div>` }
+}
+
+function openAddStaff() {
+  openPanel('Add Staff Member', buildStaffForm())
+}
+
+function openEditStaff(id) {
+  const s = currentConfig.staff.find(x => x.id === id)
+  if (!s) return
+  editStore[id] = s
+  openPanel('Edit Staff Member', buildStaffForm(s) + `
+    <div class="panel-actions">
+      <button class="btn btn-danger" onclick="deleteStaff('${id}')">Delete</button>
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStaff('${id}')">Save</button>
+    </div>`)
+}
+
+function buildStaffForm(s = {}) {
+  const roleOptions = ['owner','bartender','waitress','staff'].map(r =>
+    `<option value="${r}" ${(s.role||'staff') === r ? 'selected' : ''}>${r}</option>`
+  ).join('')
+  const form = `
+    <div class="panel-row"><label>Name</label><input id="p-s-name" value="${esc(s.name||'')}" placeholder="e.g. Dawit"></div>
+    <div class="panel-row"><label>Role</label><select id="p-s-role">${roleOptions}</select></div>
+    <div class="panel-row"><label>Telegram User ID</label><input id="p-s-uid" value="${s.telegram_user_id||''}" type="number" placeholder="Numeric Telegram user ID"><small style="color:var(--muted);font-size:0.75rem">They can find it via @userinfobot on Telegram</small></div>`
+  if (!s.id) return form + `<div class="panel-actions">
+      <button class="btn btn-ghost" onclick="closePanel()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStaff()">Save</button>
+    </div>`
+  return form
+}
+
+async function saveStaff(id) {
+  const name = document.getElementById('p-s-name').value.trim()
+  const role = document.getElementById('p-s-role').value
+  const uid  = parseInt(document.getElementById('p-s-uid').value) || null
+  if (!uid) return alert('Telegram User ID required')
+  try {
+    if (id) await update('bar_staff', id, { name, role, telegram_user_id: uid })
+    else    await insert('bar_staff', { bar_id: currentBarId, name, role, telegram_user_id: uid })
+    closePanel(); loadStaff()
+  } catch (e) { alert('Error: ' + e.message) }
+}
+
+async function deleteStaff(id) {
+  if (!confirm('Remove this staff member?')) return
+  try { await del('bar_staff', id); closePanel(); loadStaff() }
+  catch (e) { alert('Error: ' + e.message) }
+}
+
+// ── PANEL HELPERS ──────────────────────────────────────────────
+function openPanel(title, html) {
+  document.getElementById('panel-title').textContent = title
+  document.getElementById('panel-body').innerHTML = html
+  document.getElementById('overlay').classList.add('show')
+  document.getElementById('panel').classList.add('open')
+}
+
+function closePanel() {
+  document.getElementById('overlay').classList.remove('show')
+  document.getElementById('panel').classList.remove('open')
+}
+
+// ── UTILITY ────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+// ── BOOT ────────────────────────────────────────────────────────
+;(function boot() {
+  renderTelegramWidget()
+  const savedUser  = localStorage.getItem('tg_user')
+  const savedToken = localStorage.getItem('sb_token')
+  const savedBarId = localStorage.getItem('bar_id')
+
+  if (!savedUser) return
+
+  if (savedToken && savedBarId) {
+    // Full session already in localStorage — restore without a network call
+    supabaseToken = savedToken
+    deepLinkCode  = localStorage.getItem('bar_code') || null
+    currentBarId  = savedBarId
+    document.getElementById('header-bar-name').textContent = localStorage.getItem('bar_name') || ''
+    updateBarStatus(localStorage.getItem('bar_open') === 'true')
+    document.getElementById('login-screen').style.display = 'none'
+    document.getElementById('app').style.display = 'flex'
+    loadTab('today')
+    return
+  }
+
+  try {
+    const u = JSON.parse(savedUser)
+    initDashboard(u.id, u.first_name)
+  } catch (e) {
+    localStorage.removeItem('tg_user')
+  }
+})()
+</script>
+</body>
+</html>
