@@ -53,7 +53,8 @@ async function requireConfig(ctx) {
 // --------------------
 bot.start(async (ctx) => {
     if (ctx.chat.type !== 'private') return
-    console.log(`/start from user ${ctx.from.id} payload="${ctx.startPayload}" at ${Date.now()}`)
+    console.log(`/start update_id=${ctx.update.update_id} user=${ctx.from.id} payload="${ctx.startPayload}"`)
+
     resetSession(ctx)
 
     const payload = ctx.startPayload
