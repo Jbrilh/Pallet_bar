@@ -143,11 +143,18 @@
 <div id="login-screen">
   <div class="login-card">
     <h1>🍻 Bar Dashboard</h1>
-    <p>Enter your bar code to access your dashboard</p>
+    <p id="login-hint">Enter your bar code to access your dashboard</p>
     <div style="width:100%">
-      <input id="code-input" type="text" placeholder="Enter bar code"
+      <input id="code-input" type="text" placeholder="Enter bar code or admin code"
         style="width:100%;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--text);font-size:1.1rem;text-align:center;outline:none"
         onkeydown="if(event.key==='Enter')checkBarCode()">
+    </div>
+    <!-- admin bar selector (hidden until admin login) -->
+    <div id="admin-bar-select" style="display:none;width:100%">
+      <select id="bar-select"
+        style="width:100%;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--text);font-size:0.95rem;outline:none">
+        <option value="">— Select a bar —</option>
+      </select>
     </div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="checkBarCode()">
       Open Dashboard
@@ -173,9 +180,9 @@
     <button class="tab-btn" data-tab="tables">🪑 Tables</button>
     <button class="tab-btn" data-tab="monthly">📅 Monthly</button>
     <button class="tab-btn" data-tab="stock">📦 Stock</button>
-    <button class="tab-btn" data-tab="menu">🍽️ Menu</button>
-    <button class="tab-btn" data-tab="setup">⚙️ Setup</button>
-    <button class="tab-btn" data-tab="staff">👥 Staff</button>
+    <button class="tab-btn" data-tab="menu" data-admin>🍽️ Menu</button>
+    <button class="tab-btn" data-tab="setup" data-admin>⚙️ Setup</button>
+    <button class="tab-btn" data-tab="staff" data-admin>👥 Staff</button>
     <button class="tab-btn" data-tab="qr">🔗 QR Code</button>
   </nav>
 
@@ -328,31 +335,80 @@ let activeTab      = 'today'
 const editStore    = {}
 let supabaseToken  = null
 let deepLinkCode   = null
+let isAdmin        = false
 
 async function checkBarCode() {
   const code = document.getElementById('code-input').value.trim()
+  const errEl = document.getElementById('code-error')
+  errEl.style.display = 'none'
+
+  // Admin bar selection (after admin code was verified)
+  if (isAdmin) {
+    const sel = document.getElementById('bar-select')
+    if (!sel.value) return
+    const bar = JSON.parse(sel.value)
+    localStorage.setItem('admin_bar_id', bar.id)
+    openDashboard(bar, true)
+    return
+  }
+
   if (!code) return
-  document.getElementById('code-error').style.display = 'none'
+
+  // Try admin code first (server-side check — code never exposed in HTML)
+  if (API_URL) {
+    try {
+      const r = await fetch(`${API_URL}/api/admin-auth`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      })
+      if (r.ok) {
+        const { bars } = await r.json()
+        isAdmin = true
+        localStorage.setItem('admin_session', '1')
+        document.getElementById('code-input').style.display = 'none'
+        document.getElementById('login-hint').textContent = 'Select a bar to manage'
+        document.getElementById('admin-bar-select').style.display = 'block'
+        document.querySelector('#login-screen .btn').textContent = 'Open as Admin'
+        const sel = document.getElementById('bar-select')
+        bars.forEach(b => {
+          const opt = document.createElement('option')
+          opt.value = JSON.stringify(b)
+          opt.textContent = b.name
+          sel.appendChild(opt)
+        })
+        return
+      }
+    } catch (e) { /* not admin — fall through to bar code check */ }
+  }
+
+  // Bar owner login
   try {
     const rows = await query('bars', `deep_link_code=eq.${code}&status=eq.approved&select=id,name,is_open,deep_link_code`)
     if (!rows.length) {
-      document.getElementById('code-error').style.display = 'block'
+      errEl.textContent = 'Bar code not found'
+      errEl.style.display = 'block'
       document.getElementById('code-input').value = ''
       return
     }
     localStorage.setItem('bar_code', code)
-    openDashboard(rows[0])
+    openDashboard(rows[0], false)
   } catch (e) {
-    document.getElementById('code-error').textContent = 'Error: ' + e.message
-    document.getElementById('code-error').style.display = 'block'
+    errEl.textContent = 'Error: ' + e.message
+    errEl.style.display = 'block'
   }
 }
 
-function openDashboard(bar) {
+function openDashboard(bar, admin) {
+  isAdmin      = !!admin
   currentBarId = bar.id
   deepLinkCode = bar.deep_link_code
   document.getElementById('header-bar-name').textContent = bar.name
   updateBarStatus(bar.is_open)
+  // show/hide admin-only tabs
+  document.querySelectorAll('.tab-btn[data-admin]').forEach(btn => {
+    btn.style.display = isAdmin ? '' : 'none'
+  })
   document.getElementById('login-screen').style.display = 'none'
   document.getElementById('app').style.display = 'flex'
   loadTab('today')
@@ -489,6 +545,8 @@ function updateBarStatus(isOpen) {
 
 function logout() {
   localStorage.removeItem('bar_code')
+  localStorage.removeItem('admin_session')
+  localStorage.removeItem('admin_bar_id')
   location.reload()
 }
 
@@ -1189,12 +1247,23 @@ function esc(s) {
 
 // ── BOOT ────────────────────────────────────────────────────────
 ;(async function boot() {
+  // restore admin session
+  const adminBarId = localStorage.getItem('admin_bar_id')
+  if (localStorage.getItem('admin_session') === '1' && adminBarId) {
+    try {
+      const rows = await query('bars', `id=eq.${adminBarId}&status=eq.approved&select=id,name,is_open,deep_link_code`)
+      if (rows.length) { openDashboard(rows[0], true); return }
+    } catch (e) { /* fall through */ }
+    localStorage.removeItem('admin_session')
+    localStorage.removeItem('admin_bar_id')
+  }
+  // restore owner session
   const saved = localStorage.getItem('bar_code')
   if (saved) {
     try {
       const rows = await query('bars', `deep_link_code=eq.${saved}&status=eq.approved&select=id,name,is_open,deep_link_code`)
-      if (rows.length) { openDashboard(rows[0]); return }
-    } catch (e) { /* fall through to login */ }
+      if (rows.length) { openDashboard(rows[0], false); return }
+    } catch (e) { /* fall through */ }
     localStorage.removeItem('bar_code')
   }
 })()

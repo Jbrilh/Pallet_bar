@@ -76,6 +76,25 @@ app.post('/api/auth', async (req, res) => {
     res.json({ token, bar })
 })
 
+// ── POST /api/admin-auth ──────────────────────────────────────
+// Validates admin code (server-side only), returns all approved bars
+app.post('/api/admin-auth', async (req, res) => {
+    const { code } = req.body || {}
+    if (!code || !process.env.ADMIN_CODE) {
+        return res.status(401).json({ error: 'Invalid admin code' })
+    }
+    if (code !== process.env.ADMIN_CODE) {
+        return res.status(401).json({ error: 'Invalid admin code' })
+    }
+    const { data: bars, error } = await supabase
+        .from('bars')
+        .select('id, name, is_open, deep_link_code')
+        .eq('status', 'approved')
+        .order('name')
+    if (error) return res.status(500).json({ error: 'Failed to load bars' })
+    res.json({ bars })
+})
+
 // ── VALIDATE TELEGRAM WIDGET HASH ─────────────────────────────
 function validateTelegramAuth(data) {
     const { hash, ...fields } = data
