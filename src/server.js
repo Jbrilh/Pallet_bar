@@ -34,6 +34,9 @@ app.post(`/webhook/${process.env.BOT_TOKEN}`, async (req, res) => {
     }
 })
 
+// Health check — visit in browser to confirm Railway URL is reachable
+app.get('/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }))
+
 // ── POST /api/auth ────────────────────────────────────────────
 // Validates Telegram Login Widget data, returns a Supabase JWT
 // scoped to the owner's bar_id so dashboard RLS policies work.
