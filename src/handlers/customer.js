@@ -9,6 +9,8 @@ const { deductStock } = require('../db/stock')
 const { sendOrderNotifications } = require('../utils/notifications')
 const { getWaitressGroup } = require('../utils/routing')
 
+const getCustomerName = ctx => getCustomerName(ctx)
+
 function resetSession(ctx) {
     if (ctx.session.table) delete tableUserMap[ctx.session.table]
     if (ctx.session.userId) activeCustomers.delete(ctx.session.userId)
@@ -105,7 +107,7 @@ bot.hears(/^Table \d+$/, async (ctx) => {
         return ctx.reply('⚠️ You already have a table. Use the menu below.', buildMainMenu())
     }
     const table = ctx.match[0]
-    const customer = ctx.session.customerName || ctx.from.first_name
+    const customer = getCustomerName(ctx)
 
     const orderId = await createOrder(table, customer)
     ctx.session.orderId = orderId
@@ -195,7 +197,7 @@ bot.hears('🗑 Clear Cart', (ctx) => {
 bot.hears('✅ Checkout', async (ctx) => {
     if (!requireTable(ctx)) return
     const { cart, table, orderId } = ctx.session
-    const customer = ctx.session.customerName || ctx.from.first_name
+    const customer = getCustomerName(ctx)
     if (!cart.length) return ctx.reply('Your cart is empty ❌', buildMainMenu())
 
     const roundNumber = ctx.session.tab.length + 1
@@ -221,7 +223,7 @@ bot.hears('✅ Checkout', async (ctx) => {
 bot.hears('🧾 Request Bill', (ctx) => {
     if (!requireTable(ctx)) return
     const { cart, table, orderId } = ctx.session
-    const customer = ctx.session.customerName || ctx.from.first_name
+    const customer = getCustomerName(ctx)
     const tab = ctx.session.tab
     const hasAnything = tab.length > 0 || cart.length > 0
     if (!hasAnything) return ctx.reply('No items on tab yet ❌', buildMainMenu())
@@ -271,7 +273,7 @@ bot.hears('🆘 Call Waiter', async (ctx) => {
     if (!requireTable(ctx)) return
 
     const { table } = ctx.session
-    const customer = ctx.session.customerName || ctx.from.first_name
+    const customer = getCustomerName(ctx)
     const waitressGroup = getWaitressGroup(table)
     const callId = `call_${table.replace(' ', '')}_${Date.now()}`
 

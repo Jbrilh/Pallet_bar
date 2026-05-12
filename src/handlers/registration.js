@@ -63,23 +63,26 @@ bot.command('register', async (ctx) => {
 })
 
 // --------------------
-// APPROVE
+// APPROVE / REJECT (shared handler)
 // --------------------
-bot.action(/^approve_bar_/, async (ctx) => {
+async function handleBarDecision(ctx, approved) {
     if (ctx.from.id !== SUPER_ADMIN_ID) return ctx.answerCbQuery()
 
-    const barId = ctx.callbackQuery.data.replace('approve_bar_', '')
-    const result = await approveBar(barId)
+    const prefix = approved ? 'approve_bar_' : 'reject_bar_'
+    const barId = ctx.callbackQuery.data.replace(prefix, '')
+    const result = approved ? await approveBar(barId) : await rejectBar(barId)
 
-    await ctx.answerCbQuery('Approved ✅')
+    if (!result) return ctx.answerCbQuery('⚠️ Failed — try again')
+
+    const label = approved ? '✅ APPROVED' : '❌ REJECTED'
+    await ctx.answerCbQuery(approved ? 'Approved ✅' : 'Rejected ❌')
     await ctx.editMessageText(
-        ctx.callbackQuery.message.text + '\n\n✅ APPROVED',
+        ctx.callbackQuery.message.text + `\n\n${label}`,
         { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
     ).catch(() => {})
 
-    if (result) {
-        const botUsername = bot.botInfo?.username
-        const deepLink = `https://t.me/${botUsername}?start=bar_${result.code}`
+    if (approved) {
+        const deepLink = `https://t.me/${bot.botInfo?.username}?start=bar_${result.code}`
         await bot.telegram.sendMessage(
             result.owner_telegram_id,
             `🎉 *Your bar has been approved!*\n\n` +
@@ -91,29 +94,14 @@ bot.action(/^approve_bar_/, async (ctx) => {
             `3. Print the QR code for your tables`,
             { parse_mode: 'Markdown' }
         )
-    }
-})
-
-// --------------------
-// REJECT
-// --------------------
-bot.action(/^reject_bar_/, async (ctx) => {
-    if (ctx.from.id !== SUPER_ADMIN_ID) return ctx.answerCbQuery()
-
-    const barId = ctx.callbackQuery.data.replace('reject_bar_', '')
-    const result = await rejectBar(barId)
-
-    await ctx.answerCbQuery('Rejected ❌')
-    await ctx.editMessageText(
-        ctx.callbackQuery.message.text + '\n\n❌ REJECTED',
-        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
-    ).catch(() => {})
-
-    if (result) {
+    } else {
         await bot.telegram.sendMessage(
             result.owner_telegram_id,
             `❌ Your bar registration for *${result.name}* was not approved.\n\nContact the admin for more information.`,
             { parse_mode: 'Markdown' }
         )
     }
-})
+}
+
+bot.action(/^approve_bar_/, ctx => handleBarDecision(ctx, true))
+bot.action(/^reject_bar_/, ctx => handleBarDecision(ctx, false))

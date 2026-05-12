@@ -23,27 +23,21 @@ async function createPendingBar(ownerTelegramId, ownerName, barName) {
     return data.id
 }
 
-async function approveBar(barId) {
-    const code = generateCode()
+async function updateBarStatus(barId, status) {
+    const update = { status }
+    if (status === 'approved') update.deep_link_code = generateCode()
+
     const { data, error } = await supabase
         .from('bars')
-        .update({ status: 'approved', deep_link_code: code })
+        .update(update)
         .eq('id', barId)
         .select('owner_telegram_id, name')
         .single()
-    if (error) { console.error('approveBar error:', error); return null }
-    return { ...data, code }
+    if (error) { console.error('updateBarStatus error:', error); return null }
+    return status === 'approved' ? { ...data, code: update.deep_link_code } : data
 }
 
-async function rejectBar(barId) {
-    const { data, error } = await supabase
-        .from('bars')
-        .update({ status: 'rejected' })
-        .eq('id', barId)
-        .select('owner_telegram_id, name')
-        .single()
-    if (error) { console.error('rejectBar error:', error); return null }
-    return data
-}
+const approveBar = barId => updateBarStatus(barId, 'approved')
+const rejectBar  = barId => updateBarStatus(barId, 'rejected')
 
 module.exports = { getBarByOwner, createPendingBar, approveBar, rejectBar }
