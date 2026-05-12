@@ -1,14 +1,13 @@
 const { bot } = require('../bot')
-const { BARTENDER_GROUP_ID } = require('../config')
 const { nextOrderNumber } = require('../state')
-const { splitCart, getWaitressGroup } = require('./routing')
+const { splitCartByGroup, getGroupByType } = require('./routing')
 const { formatItems } = require('./formatting')
 
-async function sendOrderNotifications(table, customer, roundNumber, cart, userId) {
-    const { waitressItems, bartenderItems } = splitCart(cart)
-    const waitressGroup = getWaitressGroup(table)
-    const orderNum = nextOrderNumber()
-    const orderId = `${table.replace(' ', '')}_R${roundNumber}_U${userId}_${Date.now()}`
+async function sendOrderNotifications(table, customer, roundNumber, cart, userId, config) {
+    const byGroup = splitCartByGroup(cart, config)
+    const bartenderGroup = getGroupByType('bartender', config)
+    const orderNum = nextOrderNumber(config.bar.id)
+    const notifId = `${table.replace(/\s/g, '')}_R${roundNumber}_U${userId}_${Date.now()}`
 
     const statusButtons = (id) => ({
         reply_markup: {
@@ -20,22 +19,20 @@ async function sendOrderNotifications(table, customer, roundNumber, cart, userId
         }
     })
 
-    if (waitressItems.length > 0) {
-        const text =
-            `🛎 ORDER #${orderNum} - Round ${roundNumber}\n\n` +
-            `Table: ${table}\n` +
-            `Customer: ${customer}\n\n` +
-            `Items:\n${formatItems(waitressItems)}`
-        await bot.telegram.sendMessage(waitressGroup, text, statusButtons(`W_${orderId}`))
-    }
+    for (const [groupId, items] of byGroup) {
+        let group = groupId ? config.groupMap[groupId] : null
+        if (!group) group = bartenderGroup  // unrouted items fall back to bartender
+        if (!group) continue
 
-    if (bartenderItems.length > 0) {
+        const prefix = group.type === 'bartender' ? '🍾' : '🛎'
+        const id = `${group.type === 'bartender' ? 'B' : 'W'}_${notifId}`
         const text =
-            `🍾 ORDER #${orderNum} - Round ${roundNumber}\n\n` +
+            `${prefix} ORDER #${orderNum} - Round ${roundNumber}\n\n` +
             `Table: ${table}\n` +
             `Customer: ${customer}\n\n` +
-            `Items:\n${formatItems(bartenderItems)}`
-        await bot.telegram.sendMessage(BARTENDER_GROUP_ID, text, statusButtons(`B_${orderId}`))
+            `Items:\n${formatItems(items)}`
+
+        await bot.telegram.sendMessage(group.chat_id, text, statusButtons(id))
     }
 }
 

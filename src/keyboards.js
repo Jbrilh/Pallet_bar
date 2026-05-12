@@ -1,17 +1,18 @@
 const { Markup } = require('telegraf')
-const { categories } = require('./menu')
 
-const tableKeyboard = Markup.keyboard([
-    ['Table 1', 'Table 2', 'Table 3'],
-    ['Table 4', 'Table 5', 'Table 6']
-]).resize().oneTime()
+function buildTableKeyboard(config) {
+    const names = config.tables.map(t => t.table_name)
+    const rows = []
+    for (let i = 0; i < names.length; i += 3) rows.push(names.slice(i, i + 3))
+    return Markup.keyboard(rows.length ? rows : [['No tables configured']]).resize().oneTime()
+}
 
-function buildMainMenu() {
-    const categoryButtons = categories.map(cat => cat.name)
+function buildMainMenu(config) {
+    const catNames = config.categories
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map(c => c.name)
     const catRows = []
-    for (let i = 0; i < categoryButtons.length; i += 2) {
-        catRows.push(categoryButtons.slice(i, i + 2))
-    }
+    for (let i = 0; i < catNames.length; i += 2) catRows.push(catNames.slice(i, i + 2))
     return Markup.keyboard([
         ...catRows,
         ['🛒 View Cart', '✅ Checkout'],
@@ -20,15 +21,14 @@ function buildMainMenu() {
     ]).resize()
 }
 
-function buildCategoryMenu(categoryName) {
-    const cat = categories.find(c => c.name === categoryName)
-    if (!cat) return buildMainMenu()
-    const itemButtons = cat.items.map(item => `${item.name} — ${item.price} ETB`)
+function buildCategoryMenu(categoryId, config) {
+    const items = config.items
+        .filter(i => i.category_id === categoryId)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    const buttons = items.map(i => `${i.name} — ${i.price} ETB`)
     const rows = []
-    for (let i = 0; i < itemButtons.length; i += 2) {
-        rows.push(itemButtons.slice(i, i + 2))
-    }
+    for (let i = 0; i < buttons.length; i += 2) rows.push(buttons.slice(i, i + 2))
     return Markup.keyboard([...rows, ['⬅️ Back to Menu']]).resize()
 }
 
-module.exports = { tableKeyboard, buildMainMenu, buildCategoryMenu }
+module.exports = { buildTableKeyboard, buildMainMenu, buildCategoryMenu }

@@ -1,22 +1,22 @@
 const { supabase } = require('./client')
-const { ITEM_MAP } = require('../menu')
 
-async function createOrder(table, customer) {
+async function createOrder(barId, table, customer) {
     const { data, error } = await supabase
         .from('orders')
-        .insert({ table_name: table, customer, total: 0, status: 'open' })
+        .insert({ bar_id: barId, table_name: table, customer, total: 0, status: 'open' })
         .select('id')
         .single()
     if (error) { console.error('createOrder error:', error); return null }
     return data.id
 }
 
-async function saveRoundItems(orderId, roundNumber, items) {
+async function saveRoundItems(orderId, barId, roundNumber, items) {
     const rows = items.map(i => ({
         order_id: orderId,
+        bar_id: barId,
         round_number: roundNumber,
         item_name: i.name,
-        category: ITEM_MAP[i.name]?.category ?? 'Unknown',
+        category: i.categoryName ?? 'Unknown',
         qty: i.qty,
         price: i.price
     }))

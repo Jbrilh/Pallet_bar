@@ -1,23 +1,21 @@
-const { WAITRESS_1_GROUP_ID, WAITRESS_2_GROUP_ID, WAITRESS_CATEGORIES } = require('../config')
-const { ITEM_MAP } = require('../menu')
-
-function getWaitressGroup(table) {
-    const num = parseInt(table.replace('Table ', ''))
-    return num <= 3 ? WAITRESS_1_GROUP_ID : WAITRESS_2_GROUP_ID
+function getTableGroup(tableName, config) {
+    return config.tableGroupMap[tableName] ?? null
 }
 
-function splitCart(cart) {
-    const waitressItems = []
-    const bartenderItems = []
+function splitCartByGroup(cart, config) {
+    const byGroup = new Map()
     for (const item of cart) {
-        const menuEntry = ITEM_MAP[item.name]
-        if (menuEntry && WAITRESS_CATEGORIES.includes(menuEntry.category)) {
-            waitressItems.push(item)
-        } else {
-            bartenderItems.push(item)
-        }
+        const entry = config.itemMap[item.name]
+        const category = entry?.category_id ? config.categoryMap[entry.category_id] : null
+        const groupId = category?.routes_to_group_id ?? null
+        if (!byGroup.has(groupId)) byGroup.set(groupId, [])
+        byGroup.get(groupId).push(item)
     }
-    return { waitressItems, bartenderItems }
+    return byGroup
 }
 
-module.exports = { getWaitressGroup, splitCart }
+function getGroupByType(type, config) {
+    return config.groups.find(g => g.type === type) ?? null
+}
+
+module.exports = { getTableGroup, splitCartByGroup, getGroupByType }
