@@ -12,7 +12,8 @@ bot.use(session({
         step: 'idle',
         activeCategory: null,
         isStaffOrder: false,
-        customerName: null
+        customerName: null,
+        registrationStep: null
     })
 }))
 
