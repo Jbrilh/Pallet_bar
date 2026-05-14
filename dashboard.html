@@ -135,6 +135,23 @@
   .toggle input:checked + .toggle-slider:before { transform: translateX(16px); }
 
   #error-banner { background: rgba(224,82,82,0.15); border: 1px solid rgba(224,82,82,0.3); color: var(--danger); padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; display: none; font-size: 0.875rem; }
+
+  /* ── WAITER ── */
+  .table-card { background: var(--card); border: 2px solid var(--border); border-radius: var(--radius); padding: 16px 12px; text-align: center; cursor: pointer; transition: all 0.2s; user-select: none; }
+  .table-card:hover { border-color: var(--accent); }
+  .table-card.open { border-color: var(--success); background: rgba(76,175,125,0.08); }
+  .table-card .table-name { font-weight: 700; font-size: 1rem; margin-bottom: 6px; }
+  .table-card .table-info { font-size: 0.75rem; color: var(--muted); }
+  .table-card.open .table-info { color: var(--success); }
+  .waiter-section { margin-bottom: 14px; }
+  .waiter-section-title { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .waiter-item-btn { width: 100%; text-align: left; background: var(--card2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; color: var(--text); font-size: 0.875rem; cursor: pointer; margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .waiter-item-btn:hover { border-color: var(--accent); }
+  .waiter-cat-btn { background: var(--card2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 0.875rem; cursor: pointer; margin: 0 6px 6px 0; }
+  .waiter-cat-btn:hover { border-color: var(--accent); }
+  .waiter-cart-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.875rem; }
+  .waiter-cart-row:last-child { border-bottom: none; }
+  .qty-btn { background: var(--border); border: none; color: var(--text); width: 24px; height: 24px; border-radius: 4px; cursor: pointer; font-size: 1rem; line-height: 1; }
 </style>
 </head>
 <body>
@@ -314,6 +331,20 @@
   </main>
 </div>
 
+<!-- ═══════════════ WAITER APP ═══════════════ -->
+<div id="waiter-app" style="display:none;flex-direction:column;min-height:100vh">
+  <header>
+    <h1>🛎 Waiter</h1>
+    <div class="header-right">
+      <span class="bar-name" id="waiter-bar-name"></span>
+      <span id="waiter-bar-status" class="closed">Closed</span>
+    </div>
+  </header>
+  <main style="padding:16px;max-width:700px;margin:0 auto;width:100%">
+    <div id="waiter-tables-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px"></div>
+  </main>
+</div>
+
 <!-- ═══════════════ SLIDE PANEL ═══════════════ -->
 <div id="overlay" onclick="closePanel()"></div>
 <div id="panel">
@@ -325,7 +356,7 @@
 const SUPABASE_URL  = 'https://gzwxcdjvezevyvicamgc.supabase.co'
 const SUPABASE_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd6d3hjZGp2ZXpldnl2aWNhbWdjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzOTgxMzYsImV4cCI6MjA5Mzk3NDEzNn0.-jQhDC2o6Pbb-Nk8Byhs2lMzGks637KwH-6NXsb2Ujg'
 // ← Paste your Railway app URL here after deploying (e.g. https://app.up.railway.app)
-const API_URL = 'https://telegram-bar-bot-production.up.railway.app'
+const API_URL = 'https://palletbar-production.up.railway.app'
 
 let currentBarId   = null
 let currentConfig  = { groups: [], categories: [], items: [], tables: [], staff: [] }
@@ -379,7 +410,17 @@ async function checkBarCode() {
         })
         return
       }
-    } catch (e) { /* not admin — fall through to bar code check */ }
+      if (r.status !== 401) {
+        errEl.textContent = `Server error ${r.status} — check Railway logs`
+        errEl.style.display = 'block'
+        return
+      }
+      // 401 = not an admin code, fall through to bar code check
+    } catch (e) {
+      errEl.textContent = 'Cannot reach server: ' + e.message
+      errEl.style.display = 'block'
+      return
+    }
   }
 
   // Bar owner login
@@ -790,9 +831,20 @@ async function loadStock() {
   } catch (e) { document.getElementById('stock-table').innerHTML = `<div class="empty">Error: ${e.message}</div>` }
 }
 
-function openAddStock() {
+async function openAddStock() {
+  const items = await query('bar_menu_items', `bar_id=eq.${currentBarId}&is_available=eq.true&order=name.asc`)
+  const tracked = new Set((currentConfig.stock || []).map(s => s.item_name))
+  const available = items.filter(i => !tracked.has(i.name))
+  if (!available.length) {
+    return openPanel('Add Stock Item', `
+      <p style="color:var(--muted);font-size:0.9rem">All menu items already have stock entries, or no menu items exist yet. Add items in the Menu tab first.</p>
+      <div class="panel-actions"><button class="btn btn-ghost" onclick="closePanel()">Close</button></div>`)
+  }
+  const options = available.map(i => `<option value="${esc(i.name)}">${esc(i.name)}</option>`).join('')
   openPanel('Add Stock Item', `
-    <div class="panel-row"><label>Item Name</label><input id="p-item-name" placeholder="e.g. Heineken 500ml"></div>
+    <div class="panel-row"><label>Menu Item</label>
+      <select id="p-item-name"><option value="">— Select item —</option>${options}</select>
+    </div>
     <div class="panel-row"><label>Quantity</label><input id="p-qty" type="number" min="0" value="0"></div>
     <div class="panel-row"><label>Low Stock Threshold</label><input id="p-threshold" type="number" min="0" value="5"></div>
     <div class="panel-actions">
@@ -801,12 +853,18 @@ function openAddStock() {
     </div>`)
 }
 
-function openEditStock(id) {
+async function openEditStock(id) {
   const r = currentConfig.stock.find(s => s.id === id)
   if (!r) return
   editStore[id] = r
+  const items = await query('bar_menu_items', `bar_id=eq.${currentBarId}&is_available=eq.true&order=name.asc`)
+  const tracked = new Set((currentConfig.stock || []).filter(s => s.id !== id).map(s => s.item_name))
+  const available = items.filter(i => !tracked.has(i.name))
+  const options = available.map(i => `<option value="${esc(i.name)}" ${i.name === r.item_name ? 'selected' : ''}>${esc(i.name)}</option>`).join('')
   openPanel('Edit Stock Item', `
-    <div class="panel-row"><label>Item Name</label><input id="p-item-name" value="${esc(r.item_name)}"></div>
+    <div class="panel-row"><label>Menu Item</label>
+      <select id="p-item-name"><option value="">— Select item —</option>${options}</select>
+    </div>
     <div class="panel-row"><label>Quantity</label><input id="p-qty" type="number" min="0" value="${r.quantity}"></div>
     <div class="panel-row"><label>Low Stock Threshold</label><input id="p-threshold" type="number" min="0" value="${r.low_stock_threshold}"></div>
     <div class="panel-actions">
@@ -817,10 +875,10 @@ function openEditStock(id) {
 }
 
 async function saveStock(id) {
-  const name = document.getElementById('p-item-name').value.trim()
+  const name = document.getElementById('p-item-name').value
   const qty  = parseInt(document.getElementById('p-qty').value) || 0
   const thr  = parseInt(document.getElementById('p-threshold').value) || 0
-  if (!name) return alert('Item name required')
+  if (!name) return alert('Please select a menu item')
   try {
     if (id) await update('stock', id, { item_name: name, quantity: qty, low_stock_threshold: thr })
     else    await insert('stock', { bar_id: currentBarId, item_name: name, quantity: qty, low_stock_threshold: thr })
@@ -1245,8 +1303,211 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
 }
 
+// ── WAITER ──────────────────────────────────────────────────────
+const w = {
+  barCode: null, barId: null, config: null,
+  table: null, orderId: null,
+  cart: [], roundNumber: 1, sentRounds: [],
+  section: 'categories' // 'categories' | 'items'
+}
+
+async function initWaiter(barCode) {
+  const rows = await query('bars', `deep_link_code=eq.${barCode}&status=eq.approved&select=id,name,is_open,deep_link_code`)
+  if (!rows.length) {
+    document.getElementById('waiter-app').innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">Invalid waiter link.</div>'
+    document.getElementById('waiter-app').style.display = 'flex'
+    return
+  }
+  const bar = rows[0]
+  w.barCode = barCode
+  w.barId   = bar.id
+  const [cats, items, tables, groups] = await Promise.all([
+    query('bar_menu_categories', `bar_id=eq.${bar.id}&order=sort_order.asc`),
+    query('bar_menu_items', `bar_id=eq.${bar.id}&is_available=eq.true&order=sort_order.asc`),
+    query('bar_tables', `bar_id=eq.${bar.id}&order=table_name.asc`),
+    query('bar_groups', `bar_id=eq.${bar.id}`)
+  ])
+  w.config = { bar, categories: cats, items, tables, groups }
+  document.getElementById('waiter-bar-name').textContent = bar.name
+  const st = document.getElementById('waiter-bar-status')
+  st.textContent = bar.is_open ? 'Open' : 'Closed'
+  st.className = bar.is_open ? 'open' : 'closed'
+  document.getElementById('waiter-app').style.display = 'flex'
+  await renderWaiterTables()
+}
+
+async function renderWaiterTables() {
+  const openOrders = await query('orders', `bar_id=eq.${w.barId}&status=eq.open&select=table_name,total`)
+  const openMap = {}
+  for (const o of openOrders) openMap[o.table_name] = o
+  const grid = document.getElementById('waiter-tables-grid')
+  grid.innerHTML = w.config.tables.map(t => {
+    const open = openMap[t.table_name]
+    return `<div class="table-card ${open ? 'open' : ''}" onclick="openWaiterTable('${t.table_name}')">
+      <div class="table-name">${t.table_name}</div>
+      <div class="table-info">${open ? `${(open.total||0).toLocaleString()} ETB` : 'Available'}</div>
+    </div>`
+  }).join('')
+}
+
+async function openWaiterTable(tableName) {
+  w.table = tableName
+  w.cart  = []
+  w.sentRounds = []
+  w.section = 'categories'
+  // load existing open order
+  const orders = await query('orders', `bar_id=eq.${w.barId}&table_name=eq.${encodeURIComponent(tableName)}&status=eq.open&select=id,total`)
+  if (orders.length) {
+    w.orderId = orders[0].id
+    const prevItems = await query('order_items', `order_id=eq.${w.orderId}&order=round_number.asc`)
+    const rounds = {}
+    for (const i of prevItems) {
+      if (!rounds[i.round_number]) rounds[i.round_number] = []
+      rounds[i.round_number].push(i)
+    }
+    w.sentRounds = Object.entries(rounds).map(([r, items]) => ({ round: +r, items }))
+    w.roundNumber = (w.sentRounds.at(-1)?.round ?? 0) + 1
+  } else {
+    w.orderId = null
+    w.roundNumber = 1
+  }
+  renderWaiterPanel()
+  openPanel(tableName, '')
+}
+
+function renderWaiterPanel() {
+  const hasSent = w.sentRounds.length > 0
+  const cartTotal = w.cart.reduce((s, i) => s + i.price * i.qty, 0)
+
+  const prevHtml = hasSent ? `
+    <div class="waiter-section">
+      <div class="waiter-section-title">Sent Rounds</div>
+      ${w.sentRounds.map(r => `
+        <div style="font-size:0.8rem;color:var(--muted);margin-bottom:4px">
+          Round ${r.round}: ${r.items.map(i => `${i.item_name} x${i.qty}`).join(', ')}
+        </div>`).join('')}
+    </div>` : ''
+
+  const cartHtml = w.cart.length ? `
+    <div class="waiter-section">
+      <div class="waiter-section-title">Current Order</div>
+      ${w.cart.map(i => `
+        <div class="waiter-cart-row">
+          <span>${i.name}</span>
+          <span style="display:flex;align-items:center;gap:8px">
+            <button class="qty-btn" onclick="waiterQty('${i.name}',-1)">−</button>
+            <span>${i.qty}</span>
+            <button class="qty-btn" onclick="waiterQty('${i.name}',1)">+</button>
+            <span style="color:var(--muted);min-width:60px;text-align:right">${(i.price*i.qty).toLocaleString()} ETB</span>
+          </span>
+        </div>`).join('')}
+      <div style="text-align:right;font-weight:700;font-size:0.9rem;margin-top:8px;color:var(--accent)">${cartTotal.toLocaleString()} ETB</div>
+    </div>` : ''
+
+  const menuHtml = w.section === 'categories'
+    ? `<div class="waiter-section">
+        <div class="waiter-section-title">Menu</div>
+        <div>${w.config.categories.map(c =>
+          `<button class="waiter-cat-btn" onclick="waiterOpenCategory('${c.id}')">${c.name}</button>`
+        ).join('')}</div>
+      </div>`
+    : (() => {
+        const catId = w._activeCatId
+        const catName = w.config.categories.find(c => c.id === catId)?.name || ''
+        const items = w.config.items.filter(i => i.category_id === catId)
+        return `<div class="waiter-section">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <button class="btn btn-ghost btn-sm" onclick="waiterBackToCategories()">← Back</button>
+            <div class="waiter-section-title" style="margin:0">${catName}</div>
+          </div>
+          ${items.map(i =>
+            `<button class="waiter-item-btn" onclick="waiterAddItem('${esc(i.name)}',${i.price},'${esc(i.category_id)}')">
+              <span>${i.name}</span><span style="color:var(--accent)">${i.price.toLocaleString()} ETB</span>
+            </button>`
+          ).join('')}
+        </div>`
+      })()
+
+  const actions = `
+    <div class="panel-actions">
+      <button class="btn btn-ghost" onclick="closePanel();renderWaiterTables()">Close</button>
+      ${w.cart.length ? `<button class="btn btn-primary" onclick="waiterSendRound()">✅ Send Round</button>` : ''}
+      ${hasSent ? `<button class="btn" style="background:var(--success);color:#000" onclick="waiterRequestBill()">🧾 Bill</button>` : ''}
+    </div>`
+
+  document.getElementById('panel-title').textContent = w.table
+  document.getElementById('panel-body').innerHTML = prevHtml + cartHtml + menuHtml + actions
+}
+
+function waiterOpenCategory(catId) {
+  w._activeCatId = catId
+  w.section = 'items'
+  renderWaiterPanel()
+}
+
+function waiterBackToCategories() {
+  w.section = 'categories'
+  renderWaiterPanel()
+}
+
+function waiterAddItem(name, price, categoryId) {
+  const cat = w.config.categories.find(c => c.id === categoryId)
+  const existing = w.cart.find(i => i.name === name)
+  if (existing) existing.qty++
+  else w.cart.push({ name, price, qty: 1, categoryName: cat?.name || '' })
+  renderWaiterPanel()
+}
+
+function waiterQty(name, delta) {
+  const idx = w.cart.findIndex(i => i.name === name)
+  if (idx === -1) return
+  w.cart[idx].qty += delta
+  if (w.cart[idx].qty <= 0) w.cart.splice(idx, 1)
+  renderWaiterPanel()
+}
+
+async function waiterSendRound() {
+  if (!w.cart.length) return
+  // create order in DB if first round
+  if (!w.orderId) {
+    const rows = await insert('orders', { bar_id: w.barId, table_name: w.table, customer: 'Walk-in', total: 0, status: 'open' })
+    w.orderId = rows[0]?.id
+  }
+  const r = await fetch(`${API_URL}/api/waiter/round`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ barCode: w.barCode, orderId: w.orderId, tableName: w.table, customerName: 'Walk-in', roundNumber: w.roundNumber, items: w.cart })
+  })
+  if (!r.ok) { alert('Error sending round'); return }
+  w.sentRounds.push({ round: w.roundNumber, items: w.cart.map(i => ({ item_name: i.name, qty: i.qty })) })
+  w.roundNumber++
+  w.cart = []
+  w.section = 'categories'
+  renderWaiterPanel()
+  renderWaiterTables()
+}
+
+async function waiterRequestBill() {
+  if (!w.orderId) return
+  const r = await fetch(`${API_URL}/api/waiter/bill`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ barCode: w.barCode, orderId: w.orderId, tableName: w.table, customerName: 'Walk-in' })
+  })
+  if (!r.ok) { alert('Error sending bill'); return }
+  const { total } = await r.json()
+  alert(`🧾 Bill sent to bartender!\nTotal: ${total.toLocaleString()} ETB`)
+  closePanel()
+  renderWaiterTables()
+}
+
 // ── BOOT ────────────────────────────────────────────────────────
 ;(async function boot() {
+  // waiter link: ?waiter=<barCode>
+  const params = new URLSearchParams(location.search)
+  const waiterCode = params.get('waiter')
+  if (waiterCode) { initWaiter(waiterCode); return }
+
   // restore admin session
   const adminBarId = localStorage.getItem('admin_bar_id')
   if (localStorage.getItem('admin_session') === '1' && adminBarId) {

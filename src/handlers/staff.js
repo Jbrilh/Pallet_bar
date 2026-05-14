@@ -118,6 +118,24 @@ bot.action(/^status_/, async (ctx) => {
 })
 
 // --------------------
+// WAITER APP LINK
+// --------------------
+bot.command('waiter', async (ctx) => {
+    if (ctx.chat.type === 'private') return
+    const barId = await getBarByChatId(ctx.chat.id)
+    if (!barId) return
+    const config = await getBarConfig(barId)
+    const code = config.bar.deep_link_code
+    if (!code) return
+    const url = `${DASHBOARD_URL}?waiter=${code}`
+    ctx.reply('🛎 Open the Waiter App:', {
+        reply_markup: {
+            inline_keyboard: [[{ text: '🛎 Waiter App', url }]]
+        }
+    })
+})
+
+// --------------------
 // WAITER ACKNOWLEDGEMENT
 // --------------------
 bot.action(/^waiter_ack_/, async (ctx) => {

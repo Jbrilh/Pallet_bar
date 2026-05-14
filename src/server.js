@@ -3,6 +3,11 @@ const crypto   = require('crypto')
 const jwt      = require('jsonwebtoken')
 const { bot }  = require('./bot')
 const { supabase } = require('./db/client')
+const { getBarConfig } = require('./db/barConfig')
+const { saveRoundItems } = require('./db/orders')
+const { deductStock } = require('./db/stock')
+const { sendOrderNotifications } = require('./utils/notifications')
+const { getGroupByType } = require('./utils/routing')
 
 const SUPABASE_REF     = 'gzwxcdjvezevyvicamgc'
 const DASHBOARD_ORIGIN = 'https://zingy-gumption-99ad2b.netlify.app'
@@ -74,6 +79,72 @@ app.post('/api/auth', async (req, res) => {
     )
 
     res.json({ token, bar })
+})
+
+// ── POST /api/waiter/round ────────────────────────────────────
+// Saves round items, deducts stock, sends Telegram notifications
+app.post('/api/waiter/round', async (req, res) => {
+    const { barCode, orderId, tableName, customerName, roundNumber, items } = req.body || {}
+    if (!barCode || !orderId || !items?.length) return res.status(400).json({ error: 'Missing fields' })
+
+    const { data: bar } = await supabase
+        .from('bars').select('id').eq('deep_link_code', barCode).eq('status', 'approved').single()
+    if (!bar) return res.status(401).json({ error: 'Invalid bar code' })
+
+    const config = await getBarConfig(bar.id)
+    await saveRoundItems(orderId, bar.id, roundNumber, items)
+    const ownerGroup = getGroupByType('owner', config)
+    await deductStock(bar.id, items, ownerGroup?.chat_id)
+    await sendOrderNotifications(tableName, customerName || 'Walk-in', roundNumber, items, null, config)
+
+    res.json({ ok: true })
+})
+
+// ── POST /api/waiter/bill ─────────────────────────────────────
+// Loads all order items from DB, sends bill to bartender group
+app.post('/api/waiter/bill', async (req, res) => {
+    const { barCode, orderId, tableName, customerName } = req.body || {}
+    if (!barCode || !orderId) return res.status(400).json({ error: 'Missing fields' })
+
+    const { data: bar } = await supabase
+        .from('bars').select('id').eq('deep_link_code', barCode).eq('status', 'approved').single()
+    if (!bar) return res.status(401).json({ error: 'Invalid bar code' })
+
+    const { data: items } = await supabase
+        .from('order_items')
+        .select('round_number, item_name, qty, price')
+        .eq('order_id', orderId)
+        .order('round_number')
+
+    if (!items?.length) return res.status(400).json({ error: 'No items on this order' })
+
+    const rounds = {}
+    let total = 0
+    for (const i of items) {
+        if (!rounds[i.round_number]) rounds[i.round_number] = []
+        rounds[i.round_number].push(i)
+        total += i.price * i.qty
+    }
+
+    const breakdown = Object.entries(rounds).map(([r, rItems]) =>
+        `Round ${r}:\n${rItems.map(i => `    - ${i.item_name} x ${i.qty} = ${i.price * i.qty} ETB`).join('\n')}`
+    ).join('\n\n')
+
+    const billText =
+        `🧾 FINAL BILL\n\nTable: ${tableName}\nCustomer: ${customerName || 'Walk-in'}\n\n` +
+        `${breakdown}\n\n💰 TOTAL: ${total} ETB`
+
+    const config = await getBarConfig(bar.id)
+    const bartenderGroup = getGroupByType('bartender', config)
+    if (bartenderGroup) {
+        await bot.telegram.sendMessage(bartenderGroup.chat_id, billText, {
+            reply_markup: {
+                inline_keyboard: [[{ text: '💰 PAID', callback_data: `paid|${tableName}|${orderId}|${total}` }]]
+            }
+        })
+    }
+
+    res.json({ ok: true, total })
 })
 
 // ── POST /api/admin-auth ──────────────────────────────────────
