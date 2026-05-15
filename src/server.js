@@ -10,7 +10,7 @@ const { sendOrderNotifications } = require('./utils/notifications')
 const { getGroupByType } = require('./utils/routing')
 
 const SUPABASE_REF     = 'gzwxcdjvezevyvicamgc'
-const DASHBOARD_ORIGIN = 'https://zingy-gumption-99ad2b.netlify.app'
+const DASHBOARD_ORIGIN = 'https://dancing-sundae-66771c.netlify.app'
 
 const app = express()
 

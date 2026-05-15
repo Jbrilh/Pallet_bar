@@ -1308,10 +1308,13 @@ const w = {
   barCode: null, barId: null, config: null,
   table: null, orderId: null,
   cart: [], roundNumber: 1, sentRounds: [],
-  section: 'categories' // 'categories' | 'items'
+  section: 'categories', // 'categories' | 'items'
+  sending: false
 }
 
 async function initWaiter(barCode) {
+  document.getElementById('login-screen').style.display = 'none'
+  document.getElementById('app').style.display = 'none'
   const rows = await query('bars', `deep_link_code=eq.${barCode}&status=eq.approved&select=id,name,is_open,deep_link_code`)
   if (!rows.length) {
     document.getElementById('waiter-app').innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">Invalid waiter link.</div>'
@@ -1337,42 +1340,78 @@ async function initWaiter(barCode) {
 }
 
 async function renderWaiterTables() {
-  const openOrders = await query('orders', `bar_id=eq.${w.barId}&status=eq.open&select=table_name,total`)
-  const openMap = {}
-  for (const o of openOrders) openMap[o.table_name] = o
+  const openOrders = await query('orders', `bar_id=eq.${w.barId}&status=eq.open&select=table_name,total,customer`)
+  const tableMap = {}
+  for (const o of openOrders) {
+    if (!tableMap[o.table_name]) tableMap[o.table_name] = { count: 0, total: 0 }
+    tableMap[o.table_name].count++
+    tableMap[o.table_name].total += o.total || 0
+  }
   const grid = document.getElementById('waiter-tables-grid')
   grid.innerHTML = w.config.tables.map(t => {
-    const open = openMap[t.table_name]
-    return `<div class="table-card ${open ? 'open' : ''}" onclick="openWaiterTable('${t.table_name}')">
+    const info = tableMap[t.table_name]
+    const label = info
+      ? `${info.count} tab${info.count > 1 ? 's' : ''} · ${info.total.toLocaleString()} ETB`
+      : 'Available'
+    return `<div class="table-card ${info ? 'open' : ''}" onclick="openWaiterTable('${t.table_name}')">
       <div class="table-name">${t.table_name}</div>
-      <div class="table-info">${open ? `${(open.total||0).toLocaleString()} ETB` : 'Available'}</div>
+      <div class="table-info">${label}</div>
     </div>`
   }).join('')
 }
 
 async function openWaiterTable(tableName) {
   w.table = tableName
+  // load all open tabs for this table
+  const orders = await query('orders', `bar_id=eq.${w.barId}&table_name=eq.${tableName}&status=eq.open&select=id,customer,total&order=created_at.asc`)
+  openPanel(tableName, '')
+  renderWaiterTabList(orders)
+}
+
+function renderWaiterTabList(orders) {
+  const tabsHtml = orders.length
+    ? orders.map(o => `
+        <button class="waiter-item-btn" onclick="openWaiterTab('${o.id}','${esc(o.customer||'Guest')}')">
+          <span>👤 ${esc(o.customer || 'Guest')}</span>
+          <span style="color:var(--accent)">${(o.total||0).toLocaleString()} ETB</span>
+        </button>`).join('')
+    : `<div class="empty" style="padding:20px 0">No open tabs — start one below</div>`
+
+  document.getElementById('panel-title').textContent = w.table
+  document.getElementById('panel-body').innerHTML = `
+    <div class="waiter-section">
+      <div class="waiter-section-title">Open Tabs</div>
+      ${tabsHtml}
+    </div>
+    <div class="panel-actions">
+      <button class="btn btn-ghost" onclick="closePanel();renderWaiterTables()">Close</button>
+      <button class="btn btn-primary" onclick="startNewTab()">+ New Tab</button>
+    </div>`
+}
+
+async function startNewTab() {
+  const name = prompt('Customer name (or leave blank for Guest):')?.trim() || 'Guest'
+  const rows = await insert('orders', { bar_id: w.barId, table_name: w.table, customer: name, total: 0, status: 'open' })
+  const orderId = rows[0]?.id
+  if (!orderId) { alert('Failed to create tab'); return }
+  openWaiterTab(orderId, name)
+}
+
+async function openWaiterTab(orderId, customerName) {
+  w.orderId = orderId
+  w.customerName = customerName
   w.cart  = []
   w.sentRounds = []
   w.section = 'categories'
-  // load existing open order
-  const orders = await query('orders', `bar_id=eq.${w.barId}&table_name=eq.${encodeURIComponent(tableName)}&status=eq.open&select=id,total`)
-  if (orders.length) {
-    w.orderId = orders[0].id
-    const prevItems = await query('order_items', `order_id=eq.${w.orderId}&order=round_number.asc`)
-    const rounds = {}
-    for (const i of prevItems) {
-      if (!rounds[i.round_number]) rounds[i.round_number] = []
-      rounds[i.round_number].push(i)
-    }
-    w.sentRounds = Object.entries(rounds).map(([r, items]) => ({ round: +r, items }))
-    w.roundNumber = (w.sentRounds.at(-1)?.round ?? 0) + 1
-  } else {
-    w.orderId = null
-    w.roundNumber = 1
+  const prevItems = await query('order_items', `order_id=eq.${orderId}&order=round_number.asc`)
+  const rounds = {}
+  for (const i of prevItems) {
+    if (!rounds[i.round_number]) rounds[i.round_number] = []
+    rounds[i.round_number].push(i)
   }
+  w.sentRounds = Object.entries(rounds).map(([r, items]) => ({ round: +r, items }))
+  w.roundNumber = (w.sentRounds.at(-1)?.round ?? 0) + 1
   renderWaiterPanel()
-  openPanel(tableName, '')
 }
 
 function renderWaiterPanel() {
@@ -1430,12 +1469,12 @@ function renderWaiterPanel() {
 
   const actions = `
     <div class="panel-actions">
-      <button class="btn btn-ghost" onclick="closePanel();renderWaiterTables()">Close</button>
+      <button class="btn btn-ghost" onclick="openWaiterTable('${w.table}')">← Tabs</button>
       ${w.cart.length ? `<button class="btn btn-primary" onclick="waiterSendRound()">✅ Send Round</button>` : ''}
       ${hasSent ? `<button class="btn" style="background:var(--success);color:#000" onclick="waiterRequestBill()">🧾 Bill</button>` : ''}
     </div>`
 
-  document.getElementById('panel-title').textContent = w.table
+  document.getElementById('panel-title').textContent = `${w.table} · ${w.customerName || 'Guest'}`
   document.getElementById('panel-body').innerHTML = prevHtml + cartHtml + menuHtml + actions
 }
 
@@ -1467,35 +1506,34 @@ function waiterQty(name, delta) {
 }
 
 async function waiterSendRound() {
-  if (!w.cart.length) return
-  // create order in DB if first round
-  if (!w.orderId) {
-    const rows = await insert('orders', { bar_id: w.barId, table_name: w.table, customer: 'Walk-in', total: 0, status: 'open' })
-    w.orderId = rows[0]?.id
-  }
+  if (!w.cart.length || w.sending) return
+  w.sending = true
   const r = await fetch(`${API_URL}/api/waiter/round`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ barCode: w.barCode, orderId: w.orderId, tableName: w.table, customerName: 'Walk-in', roundNumber: w.roundNumber, items: w.cart })
+    body: JSON.stringify({ barCode: w.barCode, orderId: w.orderId, tableName: w.table, customerName: w.customerName || 'Guest', roundNumber: w.roundNumber, items: w.cart })
   })
-  if (!r.ok) { alert('Error sending round'); return }
+  if (!r.ok) { alert('Error sending round'); w.sending = false; return }
   w.sentRounds.push({ round: w.roundNumber, items: w.cart.map(i => ({ item_name: i.name, qty: i.qty })) })
   w.roundNumber++
   w.cart = []
   w.section = 'categories'
+  w.sending = false
   renderWaiterPanel()
   renderWaiterTables()
 }
 
 async function waiterRequestBill() {
-  if (!w.orderId) return
+  if (!w.orderId || w.sending) return
+  w.sending = true
   const r = await fetch(`${API_URL}/api/waiter/bill`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ barCode: w.barCode, orderId: w.orderId, tableName: w.table, customerName: 'Walk-in' })
+    body: JSON.stringify({ barCode: w.barCode, orderId: w.orderId, tableName: w.table, customerName: w.customerName || 'Guest' })
   })
-  if (!r.ok) { alert('Error sending bill'); return }
+  if (!r.ok) { alert('Error sending bill'); w.sending = false; return }
   const { total } = await r.json()
+  w.sending = false
   alert(`🧾 Bill sent to bartender!\nTotal: ${total.toLocaleString()} ETB`)
   closePanel()
   renderWaiterTables()
@@ -1506,7 +1544,7 @@ async function waiterRequestBill() {
   // waiter link: ?waiter=<barCode>
   const params = new URLSearchParams(location.search)
   const waiterCode = params.get('waiter')
-  if (waiterCode) { initWaiter(waiterCode); return }
+  if (waiterCode) { await initWaiter(waiterCode); return }
 
   // restore admin session
   const adminBarId = localStorage.getItem('admin_bar_id')
